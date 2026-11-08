@@ -1,15 +1,22 @@
 import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
-import { WatchlistGroup, WatchlistItem, WatchlistMarket } from '../../core/models/wealth.models';
+import { WatchlistGroup, WatchlistItem, WatchlistMarket, WatchlistMetricKey } from '../../core/models/wealth.models';
 import { WealthService } from '../../core/services/wealth.service';
 import { ShellComponent } from '../../shared/components/shell/shell.component';
 
-type WatchlistColumnKey = 'symbol' | 'name' | 'assetType' | 'price' | 'change' | 'trend' | 'sector' | 'score' | 'volume';
+type WatchlistColumnKey = 'symbol' | 'name' | 'assetType' | 'price' | 'change' | 'trend' | 'sector' | 'score' | 'volume' | WatchlistMetricKey;
 
 interface WatchlistColumn {
   key: WatchlistColumnKey;
   label: string;
+  group: string;
 }
+
+const FAVORITE_WATCHLISTS_STORAGE_KEY = 'folio-pro.favorite-watchlists';
+const FAVORITE_SYMBOLS_STORAGE_KEY = 'folio-pro.favorite-symbols';
+const WATCHLIST_COLUMNS_STORAGE_KEY = 'folio-pro.watchlist-columns';
+const WATCHLIST_DATA_STORAGE_KEY = 'folio-pro.watchlist-data';
+const FAVORITES_LIST_ID = '__favorites__';
 
 @Component({
   selector: 'app-watchlists',
@@ -17,7 +24,7 @@ interface WatchlistColumn {
   imports: [CommonModule, ShellComponent],
   template: `
     <app-shell>
-      <div class="page-shell">
+      <div class="page-shell watchlists-page">
         <div class="page-header">
           <div>
             <h1>Watchlists</h1>
@@ -40,30 +47,179 @@ interface WatchlistColumn {
               <button class="tool-button" type="button" (click)="fileInput.click()">Import CSV</button>
               <button class="tool-button" type="button" (click)="exportCsv()">Export CSV</button>
               <button class="tool-button" type="button" [attr.aria-expanded]="columnsEditorOpen"
-                aria-controls="columns-editor" (click)="columnsEditorOpen = !columnsEditorOpen">Edit columns</button>
+                aria-controls="columns-editor" (click)="openColumnEditor()">Edit columns</button>
             </div>
           </div>
 
-          <div class="columns-editor" id="columns-editor" *ngIf="columnsEditorOpen">
-            <p>Choose the columns to display. At least one column must remain visible.</p>
-            <label class="column-option" *ngFor="let column of availableColumns">
-              <input type="checkbox" [checked]="isColumnVisible(column.key)"
-                (change)="toggleColumn(column.key, $event)">
-              {{ column.label }}
-            </label>
+          <div class="favorite-strip" aria-label="Favorite watchlists">
+            <span class="favorite-label">Favorites</span>
+            <button type="button" class="favorite-chip" *ngFor="let watchlist of favoriteWatchlists"
+              [class.selected]="selectedWatchlistId === watchlist.id" (click)="selectFavoriteWatchlist(watchlist.id)">
+              <span aria-hidden="true">★</span> {{ watchlist.name }}
+            </button>
+            <span class="favorite-empty" *ngIf="favoriteWatchlists.length === 0">Favorite a watchlist from the dropdown to pin it here.</span>
+          </div>
+
+          <div class="modal-backdrop" *ngIf="columnsEditorOpen" (click)="cancelColumnEditor()">
+            <section class="columns-modal" id="columns-editor" role="dialog" aria-modal="true"
+              aria-labelledby="columns-title" (click)="$event.stopPropagation()" (keydown.escape)="cancelColumnEditor()">
+              <header class="modal-header">
+                <div>
+                  <span class="eyebrow">Table preferences</span>
+                  <h2 id="columns-title">Edit columns</h2>
+                </div>
+                <button type="button" class="modal-close" aria-label="Close column editor" (click)="cancelColumnEditor()">×</button>
+              </header>
+              <p class="modal-description">Select the columns to show in your watchlist. Changes are applied after saving.</p>
+              <div class="columns-editor">
+                <ng-container *ngFor="let group of columnGroups">
+                  <strong class="column-group-title">{{ group }}</strong>
+                  <label class="column-option" *ngFor="let column of columnsForGroup(group)">
+                    <input type="checkbox" [checked]="isDraftColumnVisible(column.key)"
+                      (change)="toggleDraftColumn(column.key, $event)">
+                    {{ column.label }}
+                  </label>
+                </ng-container>
+              </div>
+              <div class="column-order" *ngIf="draftColumnKeys.length">
+                <strong class="column-group-title">Selected column order</strong>
+                <div class="column-order-row" *ngFor="let key of draftColumnKeys; let index = index">
+                  <span>{{ columnLabel(key) }}</span>
+                  <div class="column-order-actions">
+                    <button type="button" [disabled]="index === 0" (click)="moveDraftColumn(index, -1)"
+                      [attr.aria-label]="'Move ' + columnLabel(key) + ' up'">↑</button>
+                    <button type="button" [disabled]="index === draftColumnKeys.length - 1" (click)="moveDraftColumn(index, 1)"
+                      [attr.aria-label]="'Move ' + columnLabel(key) + ' down'">↓</button>
+                  </div>
+                </div>
+              </div>
+              <p class="modal-error" *ngIf="columnEditorMessage" role="status">{{ columnEditorMessage }}</p>
+              <footer class="modal-actions">
+                <button type="button" class="tool-button" (click)="cancelColumnEditor()">Cancel</button>
+                <button type="button" class="save-button" (click)="saveColumnPreferences()">Save columns</button>
+              </footer>
+            </section>
           </div>
 
           <div class="list-controls">
             <div class="list-select">
-              <label for="watchlist-select">{{ selectedMarket }} watchlist</label>
-              <select id="watchlist-select" [value]="selectedWatchlistId" (change)="selectWatchlist($event)">
-                <option *ngFor="let watchlist of watchlists" [value]="watchlist.id">{{ watchlist.name }}</option>
-              </select>
+              <label id="watchlist-select-label">{{ selectedMarket }} watchlist</label>
+              <div class="watchlist-dropdown" (click)="$event.stopPropagation()">
+                <button id="watchlist-select" type="button" class="watchlist-select-button"
+                  aria-labelledby="watchlist-select-label" [attr.aria-expanded]="watchlistDropdownOpen"
+                  aria-haspopup="listbox" (click)="watchlistDropdownOpen = !watchlistDropdownOpen">
+                  <span>{{ selectedWatchlist.name }}</span><span class="dropdown-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="watchlist-menu" role="listbox" *ngIf="watchlistDropdownOpen">
+                  <button *ngIf="hasFavoriteSymbols" type="button" class="watchlist-option"
+                    [class.active]="isFavoritesList" role="option" [attr.aria-selected]="isFavoritesList"
+                    (click)="selectWatchlist(favoritesListId)">
+                    <span class="option-name"><span class="favorite-star" aria-hidden="true">★</span> Favorites</span>
+                  </button>
+                  <div class="watchlist-option-row" *ngFor="let watchlist of watchlists">
+                    <button type="button" class="watchlist-option" [class.active]="selectedWatchlistId === watchlist.id"
+                      role="option" [attr.aria-selected]="selectedWatchlistId === watchlist.id"
+                      (click)="selectWatchlist(watchlist.id)">
+                      <span class="option-name">
+                        <span class="favorite-star" *ngIf="isFavoriteWatchlist(watchlist)" aria-hidden="true">★</span>
+                        {{ watchlist.name }}
+                      </span>
+                    </button>
+                    <button type="button" class="dropdown-favorite-button"
+                      [class.is-favorite]="isFavoriteWatchlist(watchlist)"
+                      [attr.aria-pressed]="isFavoriteWatchlist(watchlist)"
+                      [attr.aria-label]="isFavoriteWatchlist(watchlist) ? 'Remove ' + watchlist.name + ' from favorites' : 'Add ' + watchlist.name + ' to favorites'"
+                       (click)="toggleFavoriteWatchlist(watchlist)">{{ isFavoriteWatchlist(watchlist) ? '★' : '☆' }}</button>
+                  </div>
+                  <button type="button" class="watchlist-option add-watchlist-option" role="option"
+                    aria-selected="false" (click)="openAddWatchlistDialog()">
+                    <span class="option-name"><span aria-hidden="true">＋</span> Add watchlist</span>
+                  </button>
+                </div>
+              </div>
             </div>
+            <button type="button" class="add-stocks-button" [disabled]="isFavoritesList"
+              (click)="openAddStocksDialog()" aria-haspopup="dialog">
+              <span aria-hidden="true">＋</span> Add stocks
+            </button>
             <div class="list-summary">
               <strong>{{ selectedWatchlist.items.length }}</strong>
               <span>assets · {{ selectedWatchlist.currency }}</span>
             </div>
+          </div>
+
+          <div class="modal-backdrop" *ngIf="addStocksDialogOpen" (click)="closeAddStocksDialog()">
+            <section class="columns-modal add-stocks-modal" role="dialog" aria-modal="true"
+              aria-labelledby="add-stocks-title" (click)="$event.stopPropagation()" (keydown.escape)="closeAddStocksDialog()">
+              <header class="modal-header">
+                <div>
+                  <span class="eyebrow">{{ selectedWatchlist.name }}</span>
+                  <h2 id="add-stocks-title">Add stocks</h2>
+                </div>
+                <button type="button" class="modal-close" aria-label="Close add stocks dialog" (click)="closeAddStocksDialog()">×</button>
+              </header>
+              <p class="modal-description">Search by company name or ticker, then add multiple stocks before saving.</p>
+              <form class="stock-entry" (submit)="addStockFromInput($event)">
+                <label for="stock-search">Stock name or ticker symbol</label>
+                <div class="stock-entry-row">
+                  <input id="stock-search" name="stockSearch" type="text" autocomplete="off"
+                    placeholder="e.g. Apple or AAPL" [value]="stockSearchText"
+                    (input)="updateStockSearch($event)">
+                  <button type="submit" class="save-button" [disabled]="!stockSearchText.trim()">Add</button>
+                </div>
+              </form>
+              <div class="stock-suggestions" *ngIf="stockSuggestions.length">
+                <span class="suggestion-label">Matching assets</span>
+                <button type="button" class="suggestion-item" *ngFor="let suggestion of stockSuggestions"
+                  (click)="stageStock(suggestion)">
+                  <span><strong>{{ suggestion.symbol }}</strong><small>{{ suggestion.name }}</small></span>
+                  <span class="suggestion-add">＋ Add</span>
+                </button>
+              </div>
+              <p class="sample-warning">Manually entered symbols are saved with placeholder price and performance until market data is connected.</p>
+              <div class="staged-heading"><strong>Stocks to add</strong><span>{{ stagedStocks.length }} selected</span></div>
+              <div class="staged-list" *ngIf="stagedStocks.length; else noStagedStocks">
+                <div class="staged-row" *ngFor="let stock of stagedStocks; let index = index">
+                  <span><strong>{{ stock.symbol }}</strong><small>{{ stock.name }}</small></span>
+                  <button type="button" class="remove-staged" [attr.aria-label]="'Remove ' + stock.symbol"
+                    (click)="removeStagedStock(index)">Remove</button>
+                </div>
+              </div>
+              <ng-template #noStagedStocks><p class="empty-staged">No stocks added yet.</p></ng-template>
+              <p class="modal-error" *ngIf="addStocksMessage" role="status">{{ addStocksMessage }}</p>
+              <footer class="modal-actions">
+                <button type="button" class="tool-button" (click)="closeAddStocksDialog()">Cancel</button>
+                <button type="button" class="save-button" [disabled]="stagedStocks.length === 0" (click)="saveStagedStocks()">
+                  Save {{ stagedStocks.length }} {{ stagedStocks.length === 1 ? 'stock' : 'stocks' }}
+                </button>
+              </footer>
+            </section>
+          </div>
+
+          <div class="modal-backdrop" *ngIf="addWatchlistDialogOpen" (click)="closeAddWatchlistDialog()">
+            <section class="columns-modal create-watchlist-modal" role="dialog" aria-modal="true"
+              aria-labelledby="create-watchlist-title" (click)="$event.stopPropagation()" (keydown.escape)="closeAddWatchlistDialog()">
+              <header class="modal-header">
+                <div>
+                  <span class="eyebrow">{{ selectedMarket }} watchlists</span>
+                  <h2 id="create-watchlist-title">Create watchlist</h2>
+                </div>
+                <button type="button" class="modal-close" aria-label="Close create watchlist dialog" (click)="closeAddWatchlistDialog()">×</button>
+              </header>
+              <p class="modal-description">Create a named list for this market. You can add stocks after saving.</p>
+              <form class="stock-entry" (submit)="saveNewWatchlist()">
+                <label for="new-watchlist-name">Watchlist name</label>
+                <input id="new-watchlist-name" name="watchlistName" type="text" maxlength="40"
+                  placeholder="e.g. Long-term ideas" [value]="newWatchlistName"
+                  (input)="updateWatchlistName($event)">
+              </form>
+              <p class="modal-error" *ngIf="newWatchlistMessage" role="status">{{ newWatchlistMessage }}</p>
+              <footer class="modal-actions">
+                <button type="button" class="tool-button" (click)="closeAddWatchlistDialog()">Cancel</button>
+                <button type="button" class="save-button" [disabled]="!newWatchlistName.trim()"
+                  (click)="saveNewWatchlist()">Save watchlist</button>
+              </footer>
+            </section>
           </div>
 
           <p class="status-message" role="status" aria-live="polite" *ngIf="statusMessage">{{ statusMessage }}</p>
@@ -76,7 +232,14 @@ interface WatchlistColumn {
               <tbody>
                 <tr *ngFor="let item of paginatedItems">
                   <td *ngFor="let column of visibleColumns" [ngSwitch]="column.key">
-                    <strong *ngSwitchCase="'symbol'">{{ item.symbol }}</strong>
+                    <span *ngSwitchCase="'symbol'" class="symbol-cell">
+                      <strong>{{ item.symbol }}</strong>
+                      <button type="button" class="star-symbol-button"
+                        [class.is-favorite]="isFavoriteSymbol(item)"
+                        [attr.aria-pressed]="isFavoriteSymbol(item)"
+                        [attr.aria-label]="isFavoriteSymbol(item) ? 'Remove ' + item.symbol + ' from favorites' : 'Add ' + item.symbol + ' to favorites'"
+                        (click)="toggleFavoriteSymbol(item)">{{ isFavoriteSymbol(item) ? '★' : '☆' }}</button>
+                    </span>
                     <span *ngSwitchCase="'price'">{{ item.price | currency:selectedWatchlist.currency:'symbol':'1.2-2' }}</span>
                     <span *ngSwitchCase="'change'" [ngClass]="item.change >= 0 ? 'text-success' : 'text-danger'">
                       {{ item.change > 0 ? '+' : '' }}{{ item.change }}%
@@ -105,81 +268,119 @@ interface WatchlistColumn {
       </div>
     </app-shell>
   `,
-  styles: [`
-    .watchlist-panel { padding:20px; }
-    .sample-note { color:var(--muted); font-size:.75rem; }
-    .toolbar,.actions,.market-control,.list-controls,.pagination,.pagination-actions { display:flex; align-items:center; }
-    .toolbar { justify-content:space-between; gap:16px; margin-bottom:18px; }
-    .market-control { gap:4px; padding:4px; border:1px solid var(--border); border-radius:8px; background:var(--panel-raised); }
-    .market-control button,.tool-button { padding:9px 12px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--muted); font-size:.76rem; white-space:nowrap; }
-    .market-control button.selected { background:#4b8cff24; color:#9dc0ff; }
-    .actions { justify-content:flex-end; flex-wrap:wrap; gap:7px; }
-    .tool-button { border-color:var(--border); color:var(--text); }
-    .tool-button:hover,.pagination button:hover:not(:disabled) { background:#ffffff0b; }
-    .file-input { display:none; }
-    .columns-editor { display:flex; align-items:center; flex-wrap:wrap; gap:10px 18px; margin:0 0 18px; padding:14px; border:1px solid var(--border); border-radius:7px; background:var(--panel-raised); }
-    .columns-editor p { flex-basis:100%; margin:0; color:var(--muted); font-size:.72rem; }
-    .column-option { display:flex; align-items:center; gap:6px; color:var(--text); font-size:.74rem; cursor:pointer; }
-    .column-option input { accent-color:var(--primary); }
-    .list-controls { justify-content:space-between; gap:20px; margin-bottom:18px; }
-    .list-select { display:grid; gap:7px; width:min(100%,320px); }
-    .list-select label { color:var(--muted); font-size:.72rem; }
-    select { width:100%; min-height:40px; padding:0 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel-raised); color:var(--text); }
-    select:focus-visible,button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-    .list-summary { display:flex; align-items:baseline; gap:6px; color:var(--muted); font-size:.78rem; }
-    .list-summary strong { color:var(--text); font-size:1.1rem; }
-    .status-message { margin:0 0 12px; color:var(--accent); font-size:.76rem; }
-    .pagination { justify-content:space-between; gap:16px; padding-top:16px; color:var(--muted); font-size:.76rem; }
-    .pagination-actions { gap:12px; }
-    .pagination button { padding:8px 11px; border:1px solid var(--border); border-radius:6px; background:var(--panel-raised); color:var(--text); font-size:.75rem; }
-    .pagination button:disabled { cursor:not-allowed; opacity:.45; }
-    .empty-state { padding:28px; color:var(--muted); text-align:center; }
-    @media(max-width:850px) {
-      .toolbar { align-items:flex-start; flex-direction:column; }
-      .actions { justify-content:flex-start; }
-    }
-    @media(max-width:620px) {
-      .watchlist-panel { padding:14px; }
-      .market-control { width:100%; }
-      .market-control button { flex:1; }
-      .list-controls,.pagination { align-items:stretch; flex-direction:column; }
-      .list-select { width:100%; }
-      .pagination-actions { justify-content:space-between; }
-    }
-  `],
 })
 export class WatchlistsComponent {
-  readonly pageSize = 5;
+  readonly pageSize = 15;
   readonly availableColumns: WatchlistColumn[] = [
-    { key: 'symbol', label: 'Symbol' },
-    { key: 'name', label: 'Asset name' },
-    { key: 'assetType', label: 'Asset type' },
-    { key: 'price', label: 'Price' },
-    { key: 'change', label: 'Change %' },
-    { key: 'trend', label: 'Trend' },
-    { key: 'sector', label: 'Sector' },
-    { key: 'score', label: 'Score' },
-    { key: 'volume', label: 'Volume' },
+    { key: 'symbol', label: 'Symbol', group: 'Overview' },
+    { key: 'name', label: 'Asset name', group: 'Overview' },
+    { key: 'assetType', label: 'Asset type', group: 'Overview' },
+    { key: 'price', label: 'Price', group: 'Market data' },
+    { key: 'change', label: 'Change %', group: 'Market data' },
+    { key: 'trend', label: 'Trend', group: 'Technical' },
+    { key: 'sector', label: 'Sector / industry', group: 'Overview' },
+    { key: 'score', label: 'Quality score', group: 'Overview' },
+    { key: 'volume', label: 'Volume', group: 'Market data' },
+    { key: 'open', label: 'Open', group: 'Market data' },
+    { key: 'previousClose', label: 'Previous close', group: 'Market data' },
+    { key: 'dayHigh', label: 'Day high', group: 'Market data' },
+    { key: 'dayLow', label: 'Day low', group: 'Market data' },
+    { key: 'marketCap', label: 'Market capitalization', group: 'Market data' },
+    { key: 'averageVolume', label: 'Average volume', group: 'Market data' },
+    { key: 'relativeVolume', label: 'Relative volume', group: 'Market data' },
+    { key: 'peRatio', label: 'P/E ratio (TTM)', group: 'Fundamentals' },
+    { key: 'forwardPE', label: 'Forward P/E', group: 'Fundamentals' },
+    { key: 'eps', label: 'EPS (TTM)', group: 'Fundamentals' },
+    { key: 'pegRatio', label: 'PEG ratio', group: 'Fundamentals' },
+    { key: 'priceToBook', label: 'Price / book', group: 'Fundamentals' },
+    { key: 'priceToSales', label: 'Price / sales', group: 'Fundamentals' },
+    { key: 'dividendYield', label: 'Dividend yield', group: 'Fundamentals' },
+    { key: 'roe', label: 'Return on equity', group: 'Fundamentals' },
+    { key: 'roa', label: 'Return on assets', group: 'Fundamentals' },
+    { key: 'grossMargin', label: 'Gross margin', group: 'Fundamentals' },
+    { key: 'operatingMargin', label: 'Operating margin', group: 'Fundamentals' },
+    { key: 'profitMargin', label: 'Profit margin', group: 'Fundamentals' },
+    { key: 'debtToEquity', label: 'Debt / equity', group: 'Fundamentals' },
+    { key: 'revenueGrowth', label: 'Revenue growth', group: 'Fundamentals' },
+    { key: 'earningsGrowth', label: 'Earnings growth', group: 'Fundamentals' },
+    { key: 'freeCashFlow', label: 'Free cash flow', group: 'Fundamentals' },
+    { key: 'analystTarget', label: 'Analyst target', group: 'Fundamentals' },
+    { key: 'week52High', label: '52-week high', group: 'Technical' },
+    { key: 'week52Low', label: '52-week low', group: 'Technical' },
+    { key: 'movingAverage50', label: '50-day moving average', group: 'Technical' },
+    { key: 'movingAverage200', label: '200-day moving average', group: 'Technical' },
+    { key: 'rsi14', label: 'RSI (14)', group: 'Technical' },
+    { key: 'macd', label: 'MACD', group: 'Technical' },
+    { key: 'macdSignal', label: 'MACD signal', group: 'Technical' },
+    { key: 'beta', label: 'Beta (5Y monthly)', group: 'Risk' },
+    { key: 'shortFloat', label: 'Short float', group: 'Risk' },
+    { key: 'nextEarnings', label: 'Next earnings date', group: 'Events' },
   ];
+  readonly columnGroups = [...new Set(this.availableColumns.map((column) => column.group))];
   visibleColumnKeys: WatchlistColumnKey[] = ['symbol', 'name', 'assetType', 'price', 'change', 'trend'];
+  draftColumnKeys: WatchlistColumnKey[] = [];
   watchlists: WatchlistGroup[] = [];
   private readonly watchlistsByMarket: Partial<Record<WatchlistMarket, WatchlistGroup[]>> = {};
+  private favoriteWatchlistKeys = new Set<string>();
+  private favoriteSymbolsByMarket: Record<WatchlistMarket, Set<string>> = { US: new Set(), India: new Set() };
   selectedMarket: WatchlistMarket = 'US';
   selectedWatchlistId = '';
+  watchlistDropdownOpen = false;
   currentPage = 1;
   columnsEditorOpen = false;
+  addStocksDialogOpen = false;
+  stockSearchText = '';
+  stagedStocks: WatchlistItem[] = [];
+  addStocksMessage = '';
+  addWatchlistDialogOpen = false;
+  newWatchlistName = '';
+  newWatchlistMessage = '';
+  columnEditorMessage = '';
   statusMessage = '';
+  readonly favoritesListId = FAVORITES_LIST_ID;
 
   constructor(private readonly wealthService: WealthService) {
+    this.loadFavorites();
+    this.loadColumnPreferences();
     this.loadWatchlists(this.selectedMarket);
   }
 
   get selectedWatchlist(): WatchlistGroup {
+    if (this.isFavoritesList) {
+      const favoriteSymbols = this.favoriteSymbolsByMarket[this.selectedMarket];
+      return {
+        id: FAVORITES_LIST_ID,
+        name: 'Favorites',
+        market: this.selectedMarket,
+        currency: this.selectedMarket === 'US' ? 'USD' : 'INR',
+        items: this.watchlists.flatMap((watchlist) => watchlist.items)
+          .filter((item, index, items) => favoriteSymbols.has(item.symbol)
+            && items.findIndex((candidate) => candidate.symbol === item.symbol) === index),
+      };
+    }
     return this.watchlists.find((watchlist) => watchlist.id === this.selectedWatchlistId) ?? this.watchlists[0];
   }
 
+  get favoriteWatchlists(): WatchlistGroup[] {
+    return this.watchlists.filter((watchlist) => this.isFavoriteWatchlist(watchlist));
+  }
+
+  get otherWatchlists(): WatchlistGroup[] {
+    return this.watchlists.filter((watchlist) => !this.isFavoriteWatchlist(watchlist));
+  }
+
+  get hasFavoriteSymbols(): boolean {
+    return this.favoriteSymbolsByMarket[this.selectedMarket].size > 0;
+  }
+
+  get isFavoritesList(): boolean {
+    return this.selectedWatchlistId === FAVORITES_LIST_ID;
+  }
+
   get visibleColumns(): WatchlistColumn[] {
-    return this.availableColumns.filter((column) => this.visibleColumnKeys.includes(column.key));
+    return this.visibleColumnKeys
+      .map((key) => this.availableColumns.find((column) => column.key === key))
+      .filter((column): column is WatchlistColumn => column !== undefined);
   }
 
   get totalPages(): number {
@@ -198,6 +399,22 @@ export class WatchlistsComponent {
     return this.selectedWatchlist.items.slice(this.startIndex, this.endIndex);
   }
 
+  get stockSuggestions(): WatchlistItem[] {
+    const query = this.stockSearchText.trim().toLowerCase();
+    if (query.length < 2) {
+      return [];
+    }
+    return this.watchlists.flatMap((watchlist) => watchlist.items)
+      .filter((item, index, items) => {
+        const matches = item.symbol.toLowerCase().includes(query) || item.name.toLowerCase().includes(query);
+        const unique = items.findIndex((candidate) => candidate.symbol === item.symbol) === index;
+        const alreadyAdded = this.selectedWatchlist.items.some((current) => current.symbol === item.symbol)
+          || this.stagedStocks.some((staged) => staged.symbol === item.symbol);
+        return matches && unique && !alreadyAdded;
+      })
+      .slice(0, 6);
+  }
+
   selectMarket(market: WatchlistMarket): void {
     if (market !== this.selectedMarket) {
       this.selectedMarket = market;
@@ -206,32 +423,260 @@ export class WatchlistsComponent {
     }
   }
 
-  selectWatchlist(event: Event): void {
-    if (event.target instanceof HTMLSelectElement) {
-      this.selectedWatchlistId = event.target.value;
-      this.currentPage = 1;
-      this.statusMessage = '';
+  selectWatchlist(id: string): void {
+    this.selectedWatchlistId = id;
+    this.currentPage = 1;
+    this.watchlistDropdownOpen = false;
+    this.statusMessage = '';
+  }
+
+  selectFavoriteWatchlist(id: string): void {
+    this.selectedWatchlistId = id;
+    this.currentPage = 1;
+    this.statusMessage = '';
+  }
+
+  isFavoriteWatchlist(watchlist: WatchlistGroup): boolean {
+    return this.favoriteWatchlistKeys.has(this.watchlistKey(watchlist));
+  }
+
+  toggleFavoriteWatchlist(watchlist: WatchlistGroup): void {
+    const key = this.watchlistKey(watchlist);
+    if (this.favoriteWatchlistKeys.has(key)) {
+      this.favoriteWatchlistKeys.delete(key);
+      this.statusMessage = `${watchlist.name} removed from favorites.`;
+    } else {
+      this.favoriteWatchlistKeys.add(key);
+      this.statusMessage = `${watchlist.name} added to favorites.`;
+    }
+    this.persistFavorites();
+  }
+
+  openAddStocksDialog(): void {
+    if (this.isFavoritesList) {
+      this.statusMessage = 'Select a watchlist before adding stocks.';
+      return;
+    }
+    this.stockSearchText = '';
+    this.stagedStocks = [];
+    this.addStocksMessage = '';
+    this.addStocksDialogOpen = true;
+  }
+
+  closeAddStocksDialog(): void {
+    this.addStocksDialogOpen = false;
+    this.addStocksMessage = '';
+  }
+
+  updateStockSearch(event: Event): void {
+    if (event.target instanceof HTMLInputElement) {
+      this.stockSearchText = event.target.value;
+      this.addStocksMessage = '';
     }
   }
 
-  isColumnVisible(key: WatchlistColumnKey): boolean {
-    return this.visibleColumnKeys.includes(key);
+  addStockFromInput(event: Event): void {
+    event.preventDefault();
+    const query = this.stockSearchText.trim();
+    if (!query) {
+      return;
+    }
+    const match = this.watchlists.flatMap((watchlist) => watchlist.items)
+      .find((item) => item.symbol.toLowerCase() === query.toLowerCase()
+        || item.name.toLowerCase() === query.toLowerCase());
+    if (match) {
+      this.stageStock(match);
+      return;
+    }
+    const symbol = query.toUpperCase().replace(/\s+/g, '');
+    if (!/^[A-Z0-9.-]{1,15}$/.test(symbol)) {
+      this.addStocksMessage = 'Enter a ticker symbol or choose a matching asset from the suggestions.';
+      return;
+    }
+    const duplicate = this.selectedWatchlist.items.some((item) => item.symbol === symbol)
+      || this.stagedStocks.some((item) => item.symbol === symbol);
+    if (duplicate) {
+      this.addStocksMessage = `${symbol} is already in this watchlist or the pending list.`;
+      return;
+    }
+    this.stageStock({
+      symbol,
+      name: symbol,
+      price: 0,
+      change: 0,
+      trend: 'Neutral',
+      assetType: 'Stock',
+      sector: '—',
+      volume: '—',
+    });
   }
 
-  toggleColumn(key: WatchlistColumnKey, event: Event): void {
+  stageStock(item: WatchlistItem): void {
+    const duplicate = this.selectedWatchlist.items.some((current) => current.symbol === item.symbol)
+      || this.stagedStocks.some((current) => current.symbol === item.symbol);
+    if (duplicate) {
+      this.addStocksMessage = `${item.symbol} is already in this watchlist or the pending list.`;
+      return;
+    }
+    this.stagedStocks = [...this.stagedStocks, { ...item }];
+    this.stockSearchText = '';
+    this.addStocksMessage = '';
+  }
+
+  removeStagedStock(index: number): void {
+    this.stagedStocks = this.stagedStocks.filter((_, itemIndex) => itemIndex !== index);
+  }
+
+  openAddWatchlistDialog(): void {
+    this.watchlistDropdownOpen = false;
+    this.newWatchlistName = '';
+    this.newWatchlistMessage = '';
+    this.addWatchlistDialogOpen = true;
+  }
+
+  closeAddWatchlistDialog(): void {
+    this.addWatchlistDialogOpen = false;
+    this.newWatchlistMessage = '';
+  }
+
+  updateWatchlistName(event: Event): void {
+    if (event.target instanceof HTMLInputElement) {
+      this.newWatchlistName = event.target.value;
+      this.newWatchlistMessage = '';
+    }
+  }
+
+  saveNewWatchlist(): void {
+    const name = this.newWatchlistName.trim();
+    if (!name) {
+      this.newWatchlistMessage = 'Enter a name for the watchlist.';
+      return;
+    }
+    if (this.watchlists.some((watchlist) => watchlist.name.toLowerCase() === name.toLowerCase())) {
+      this.newWatchlistMessage = 'A watchlist with this name already exists for the selected market.';
+      return;
+    }
+    const newWatchlist: WatchlistGroup = {
+      id: `custom-${Date.now()}`,
+      name,
+      market: this.selectedMarket,
+      currency: this.selectedMarket === 'US' ? 'USD' : 'INR',
+      items: [],
+    };
+    this.watchlists = [...this.watchlists, newWatchlist];
+    this.watchlistsByMarket[this.selectedMarket] = this.watchlists;
+    this.selectedWatchlistId = newWatchlist.id;
+    this.currentPage = 1;
+    this.persistWatchlists();
+    this.addWatchlistDialogOpen = false;
+    this.newWatchlistMessage = '';
+    this.statusMessage = `${name} created. Use Add stocks to add symbols to this watchlist.`;
+  }
+
+  saveStagedStocks(): void {
+    if (this.isFavoritesList || this.stagedStocks.length === 0) {
+      return;
+    }
+    const updatedWatchlist: WatchlistGroup = {
+      ...this.selectedWatchlist,
+      items: [...this.selectedWatchlist.items, ...this.stagedStocks],
+    };
+    const updatedWatchlists = this.watchlists.map((watchlist) =>
+      watchlist.id === updatedWatchlist.id ? updatedWatchlist : watchlist,
+    );
+    this.watchlistsByMarket[this.selectedMarket] = updatedWatchlists;
+    this.watchlists = updatedWatchlists;
+    this.persistWatchlists();
+    const addedCount = this.stagedStocks.length;
+    this.currentPage = Math.ceil(updatedWatchlist.items.length / this.pageSize);
+    this.stagedStocks = [];
+    this.addStocksDialogOpen = false;
+    this.statusMessage = `${addedCount} ${addedCount === 1 ? 'stock' : 'stocks'} saved to ${updatedWatchlist.name}.`;
+  }
+
+  columnLabel(key: WatchlistColumnKey): string {
+    return this.availableColumns.find((column) => column.key === key)?.label ?? key;
+  }
+
+  isFavoriteSymbol(item: WatchlistItem): boolean {
+    return this.favoriteSymbolsByMarket[this.selectedMarket].has(item.symbol);
+  }
+
+  toggleFavoriteSymbol(item: WatchlistItem): void {
+    const favorites = this.favoriteSymbolsByMarket[this.selectedMarket];
+    if (favorites.has(item.symbol)) {
+      favorites.delete(item.symbol);
+      this.statusMessage = `${item.symbol} removed from favorites.`;
+    } else {
+      favorites.add(item.symbol);
+      this.statusMessage = `${item.symbol} added to favorites.`;
+    }
+    if (this.isFavoritesList && favorites.size === 0) {
+      this.selectedWatchlistId = this.watchlists[0]?.id ?? '';
+      this.currentPage = 1;
+    }
+    this.persistFavorites();
+  }
+
+  columnsForGroup(group: string): WatchlistColumn[] {
+    return this.availableColumns.filter((column) => column.group === group);
+  }
+
+  openColumnEditor(): void {
+    this.draftColumnKeys = [...this.visibleColumnKeys];
+    this.columnEditorMessage = '';
+    this.columnsEditorOpen = true;
+  }
+
+  isDraftColumnVisible(key: WatchlistColumnKey): boolean {
+    return this.draftColumnKeys.includes(key);
+  }
+
+  toggleDraftColumn(key: WatchlistColumnKey, event: Event): void {
     if (!(event.target instanceof HTMLInputElement)) {
       return;
     }
-    const checked = event.target.checked;
-    if (!checked && this.visibleColumnKeys.length === 1) {
-      event.target.checked = true;
-      this.statusMessage = 'At least one column must remain visible.';
+    if (event.target.checked) {
+      if (!this.draftColumnKeys.includes(key)) {
+        this.draftColumnKeys = [...this.draftColumnKeys, key];
+      }
+      this.columnEditorMessage = '';
       return;
     }
-    this.visibleColumnKeys = checked
-      ? [...this.visibleColumnKeys, key]
-      : this.visibleColumnKeys.filter((visibleKey) => visibleKey !== key);
-    this.statusMessage = '';
+    if (this.draftColumnKeys.length === 1) {
+      event.target.checked = true;
+      this.columnEditorMessage = 'Select at least one column.';
+      return;
+    }
+    this.draftColumnKeys = this.draftColumnKeys.filter((draftKey) => draftKey !== key);
+    this.columnEditorMessage = '';
+  }
+
+  moveDraftColumn(index: number, direction: -1 | 1): void {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= this.draftColumnKeys.length) {
+      return;
+    }
+    const reordered = [...this.draftColumnKeys];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+    this.draftColumnKeys = reordered;
+  }
+
+  saveColumnPreferences(): void {
+    if (!this.draftColumnKeys.length) {
+      this.columnEditorMessage = 'Select at least one column before saving.';
+      return;
+    }
+    this.visibleColumnKeys = [...this.draftColumnKeys];
+    localStorage.setItem(WATCHLIST_COLUMNS_STORAGE_KEY, JSON.stringify(this.visibleColumnKeys));
+    this.columnsEditorOpen = false;
+    this.columnEditorMessage = '';
+    this.statusMessage = `${this.visibleColumnKeys.length} columns applied to the watchlist.`;
+  }
+
+  cancelColumnEditor(): void {
+    this.columnsEditorOpen = false;
+    this.columnEditorMessage = '';
   }
 
   getColumnValue(item: WatchlistItem, key: WatchlistColumnKey): string | number {
@@ -245,6 +690,41 @@ export class WatchlistsComponent {
       case 'sector': return item.sector ?? '—';
       case 'score': return item.score ?? '—';
       case 'volume': return item.volume ?? '—';
+      case 'open':
+      case 'previousClose':
+      case 'dayHigh':
+      case 'dayLow':
+      case 'marketCap':
+      case 'averageVolume':
+      case 'relativeVolume':
+      case 'peRatio':
+      case 'forwardPE':
+      case 'eps':
+      case 'pegRatio':
+      case 'priceToBook':
+      case 'priceToSales':
+      case 'dividendYield':
+      case 'roe':
+      case 'roa':
+      case 'grossMargin':
+      case 'operatingMargin':
+      case 'profitMargin':
+      case 'debtToEquity':
+      case 'revenueGrowth':
+      case 'earningsGrowth':
+      case 'freeCashFlow':
+      case 'analystTarget':
+      case 'week52High':
+      case 'week52Low':
+      case 'movingAverage50':
+      case 'movingAverage200':
+      case 'rsi14':
+      case 'macd':
+      case 'macdSignal':
+      case 'beta':
+      case 'shortFloat':
+      case 'nextEarnings':
+        return item.metrics?.[key] ?? '—';
     }
   }
 
@@ -280,6 +760,11 @@ export class WatchlistsComponent {
     if (!file) {
       return;
     }
+    if (this.isFavoritesList) {
+      this.statusMessage = 'Choose an individual watchlist before importing assets.';
+      input.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -288,9 +773,13 @@ export class WatchlistsComponent {
           ...this.selectedWatchlist,
           items: [...this.selectedWatchlist.items, ...importedItems],
         };
+        this.watchlistsByMarket[this.selectedMarket] = this.watchlistsByMarket[this.selectedMarket]?.map((watchlist) =>
+          watchlist.id === updatedWatchlist.id ? updatedWatchlist : watchlist,
+        );
         this.watchlists = this.watchlists.map((watchlist) =>
           watchlist.id === updatedWatchlist.id ? updatedWatchlist : watchlist,
         );
+        this.persistWatchlists();
         this.currentPage = Math.ceil(updatedWatchlist.items.length / this.pageSize);
         this.statusMessage = `${importedItems.length} assets imported into ${updatedWatchlist.name}.`;
       } catch (error) {
@@ -308,10 +797,135 @@ export class WatchlistsComponent {
 
   private loadWatchlists(market: WatchlistMarket): void {
     // Both markets share this loader; replace its service source with one parameterized backend call later.
-    this.watchlistsByMarket[market] ??= this.wealthService.getWatchlists(market);
+    if (!this.watchlistsByMarket[market]) {
+      const sampleLists = this.wealthService.getWatchlists(market);
+      const savedLists = this.readPersistedWatchlists()[market] ?? [];
+      const savedById = new Map(savedLists.map((watchlist) => [watchlist.id, watchlist]));
+      const sampleIds = new Set(sampleLists.map((watchlist) => watchlist.id));
+      const savedSampleLists = sampleLists.map((sampleList) => savedById.get(sampleList.id) ?? sampleList);
+      const customLists = savedLists.filter((watchlist) => !sampleIds.has(watchlist.id));
+      this.watchlistsByMarket[market] = [...savedSampleLists, ...customLists];
+    }
     this.watchlists = this.watchlistsByMarket[market] ?? [];
     this.selectedWatchlistId = this.watchlists[0]?.id ?? '';
     this.currentPage = 1;
+  }
+
+  private persistWatchlists(): void {
+    const savedLists = this.readPersistedWatchlists();
+    savedLists[this.selectedMarket] = this.watchlists;
+    localStorage.setItem(WATCHLIST_DATA_STORAGE_KEY, JSON.stringify(savedLists));
+  }
+
+  private readPersistedWatchlists(): Partial<Record<WatchlistMarket, WatchlistGroup[]>> {
+    const value = localStorage.getItem(WATCHLIST_DATA_STORAGE_KEY);
+    if (!value) {
+      return {};
+    }
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (typeof parsed !== 'object' || parsed === null) {
+        return {};
+      }
+      const record = parsed as Record<string, unknown>;
+      return {
+        US: this.isWatchlistArray(record['US'], 'US') ? record['US'] : undefined,
+        India: this.isWatchlistArray(record['India'], 'India') ? record['India'] : undefined,
+      };
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return {};
+      }
+      throw error;
+    }
+  }
+
+  private isWatchlistArray(value: unknown, market: WatchlistMarket): value is WatchlistGroup[] {
+    return Array.isArray(value) && value.every((watchlist) =>
+      typeof watchlist === 'object' && watchlist !== null
+      && 'id' in watchlist && typeof watchlist.id === 'string'
+      && 'name' in watchlist && typeof watchlist.name === 'string'
+      && 'market' in watchlist && watchlist.market === market
+      && 'currency' in watchlist && (watchlist.currency === 'USD' || watchlist.currency === 'INR')
+      && 'items' in watchlist && Array.isArray(watchlist.items)
+      && watchlist.items.every((item: unknown) =>
+        typeof item === 'object' && item !== null
+        && 'symbol' in item && typeof item.symbol === 'string'
+        && 'name' in item && typeof item.name === 'string'
+        && 'price' in item && typeof item.price === 'number'
+        && 'change' in item && typeof item.change === 'number'
+        && 'trend' in item && (item.trend === 'Bullish' || item.trend === 'Neutral' || item.trend === 'Bearish')),
+    );
+  }
+
+  private watchlistKey(watchlist: WatchlistGroup): string {
+    return `${watchlist.market}:${watchlist.id}`;
+  }
+
+  private loadFavorites(): void {
+    const favoriteWatchlists = this.readStoredStringArray(FAVORITE_WATCHLISTS_STORAGE_KEY);
+    this.favoriteWatchlistKeys = new Set(favoriteWatchlists);
+    const storedSymbols = this.readStoredRecord(FAVORITE_SYMBOLS_STORAGE_KEY);
+    this.favoriteSymbolsByMarket = {
+      US: new Set(storedSymbols.US ?? []),
+      India: new Set(storedSymbols.India ?? []),
+    };
+  }
+
+  private loadColumnPreferences(): void {
+    const storedColumns = this.readStoredStringArray(WATCHLIST_COLUMNS_STORAGE_KEY);
+    const validKeys = new Set(this.availableColumns.map((column) => column.key));
+    const validStoredColumns = storedColumns.filter((key): key is WatchlistColumnKey => validKeys.has(key as WatchlistColumnKey));
+    if (validStoredColumns.length) {
+      this.visibleColumnKeys = validStoredColumns;
+    }
+  }
+
+  private readStoredStringArray(key: string): string[] {
+    const value = localStorage.getItem(key);
+    if (!value) {
+      return [];
+    }
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) && parsed.every((entry) => typeof entry === 'string') ? parsed : [];
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private readStoredRecord(key: string): Partial<Record<WatchlistMarket, string[]>> {
+    const value = localStorage.getItem(key);
+    if (!value) {
+      return {};
+    }
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (typeof parsed !== 'object' || parsed === null) {
+        return {};
+      }
+      const record = parsed as Record<string, unknown>;
+      return {
+        US: Array.isArray(record['US']) && record['US'].every((item) => typeof item === 'string') ? record['US'] as string[] : [],
+        India: Array.isArray(record['India']) && record['India'].every((item) => typeof item === 'string') ? record['India'] as string[] : [],
+      };
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return {};
+      }
+      throw error;
+    }
+  }
+
+  private persistFavorites(): void {
+    localStorage.setItem(FAVORITE_WATCHLISTS_STORAGE_KEY, JSON.stringify([...this.favoriteWatchlistKeys]));
+    localStorage.setItem(FAVORITE_SYMBOLS_STORAGE_KEY, JSON.stringify({
+      US: [...this.favoriteSymbolsByMarket.US],
+      India: [...this.favoriteSymbolsByMarket.India],
+    }));
   }
 
   private parseCsv(csv: string): WatchlistItem[] {
@@ -346,6 +960,16 @@ export class WatchlistsComponent {
       if (scoreValue && !Number.isFinite(score)) {
         throw new Error(`CSV row ${rowNumber} has an invalid score.`);
       }
+      const metricKeys: WatchlistMetricKey[] = this.availableColumns
+        .map((column) => column.key)
+        .filter((key): key is WatchlistMetricKey => !['symbol', 'name', 'assetType', 'price', 'change', 'trend', 'sector', 'score', 'volume'].includes(key));
+      const metrics: Partial<Record<WatchlistMetricKey, string | number>> = {};
+      for (const key of metricKeys) {
+        const value = values.get(key.toLowerCase());
+        if (value) {
+          metrics[key] = value;
+        }
+      }
       return {
         symbol,
         name,
@@ -356,6 +980,7 @@ export class WatchlistsComponent {
         sector: values.get('sector') || undefined,
         score,
         volume: values.get('volume') || undefined,
+        metrics,
       };
     });
   }

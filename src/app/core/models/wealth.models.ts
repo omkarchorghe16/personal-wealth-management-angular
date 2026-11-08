@@ -45,7 +45,44 @@ export interface WatchlistItem {
   sector?: string;
   score?: number;
   volume?: string;
+  metrics?: Partial<Record<WatchlistMetricKey, string | number>>;
 }
+
+export type WatchlistMetricKey =
+  | 'open'
+  | 'previousClose'
+  | 'dayHigh'
+  | 'dayLow'
+  | 'marketCap'
+  | 'averageVolume'
+  | 'relativeVolume'
+  | 'peRatio'
+  | 'forwardPE'
+  | 'eps'
+  | 'pegRatio'
+  | 'priceToBook'
+  | 'priceToSales'
+  | 'dividendYield'
+  | 'roe'
+  | 'roa'
+  | 'grossMargin'
+  | 'operatingMargin'
+  | 'profitMargin'
+  | 'debtToEquity'
+  | 'revenueGrowth'
+  | 'earningsGrowth'
+  | 'freeCashFlow'
+  | 'analystTarget'
+  | 'week52High'
+  | 'week52Low'
+  | 'movingAverage50'
+  | 'movingAverage200'
+  | 'rsi14'
+  | 'macd'
+  | 'macdSignal'
+  | 'beta'
+  | 'shortFloat'
+  | 'nextEarnings';
 
 export interface PortfolioSummary {
   totalValue: number;

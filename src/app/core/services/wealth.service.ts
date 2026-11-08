@@ -9,6 +9,7 @@ import {
   StockAsset,
   WatchlistGroup,
   WatchlistItem,
+  WatchlistMetricKey,
   WatchlistMarket,
 } from '../models/wealth.models';
 
@@ -200,7 +201,54 @@ export class WealthService {
         ],
       },
     ];
-    return watchlists.filter((watchlist) => watchlist.market === market);
+    return watchlists
+      .filter((watchlist) => watchlist.market === market)
+      .map((watchlist) => ({
+        ...watchlist,
+        items: watchlist.items.map((item, index) => this.withSampleMetrics(item, index, watchlist.currency)),
+      }));
+  }
+
+  private withSampleMetrics(item: WatchlistItem, index: number, currency: 'USD' | 'INR'): WatchlistItem {
+    const price = item.price;
+    const offset = index + 1;
+    const metrics: Record<WatchlistMetricKey, string | number> = {
+      open: price * (1 - item.change / 1000),
+      previousClose: price / (1 + item.change / 100),
+      dayHigh: price * 1.015,
+      dayLow: price * 0.985,
+      marketCap: currency === 'USD' ? `$${(price * (140 + offset * 19)).toLocaleString('en-US', { maximumFractionDigits: 0 })}M` : `₹${(price * (16 + offset * 3)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}Cr`,
+      averageVolume: item.volume ?? `${(1 + offset * 0.37).toFixed(1)}M`,
+      relativeVolume: `${(0.8 + offset * 0.13).toFixed(2)}x`,
+      peRatio: (18 + offset * 2.7).toFixed(1),
+      forwardPE: (16 + offset * 2.3).toFixed(1),
+      eps: (price / (18 + offset * 2.7)).toFixed(2),
+      pegRatio: (0.8 + offset * 0.09).toFixed(2),
+      priceToBook: (2.1 + offset * 0.42).toFixed(1),
+      priceToSales: (3.4 + offset * 0.61).toFixed(1),
+      dividendYield: `${(0.4 + (offset % 5) * 0.35).toFixed(2)}%`,
+      roe: `${(10 + (offset % 8) * 2.4).toFixed(1)}%`,
+      roa: `${(5 + (offset % 7) * 1.3).toFixed(1)}%`,
+      grossMargin: `${(28 + (offset % 9) * 4.2).toFixed(1)}%`,
+      operatingMargin: `${(10 + (offset % 7) * 3.1).toFixed(1)}%`,
+      profitMargin: `${(7 + (offset % 8) * 2.5).toFixed(1)}%`,
+      debtToEquity: (0.2 + (offset % 6) * 0.17).toFixed(2),
+      revenueGrowth: `${(4 + (offset % 8) * 3.1).toFixed(1)}%`,
+      earningsGrowth: `${(3 + (offset % 9) * 3.8).toFixed(1)}%`,
+      freeCashFlow: currency === 'USD' ? `$${(price * offset * 0.31).toFixed(0)}M` : `₹${(price * offset * 0.04).toFixed(0)}Cr`,
+      analystTarget: (price * (1.05 + offset * 0.008)).toFixed(2),
+      week52High: (price * 1.32).toFixed(2),
+      week52Low: (price * 0.68).toFixed(2),
+      movingAverage50: (price * (0.97 + offset * 0.004)).toFixed(2),
+      movingAverage200: (price * (0.89 + offset * 0.006)).toFixed(2),
+      rsi14: (38 + (offset * 7) % 45).toFixed(1),
+      macd: ((item.change / 100) * price).toFixed(3),
+      macdSignal: ((item.change / 120) * price).toFixed(3),
+      beta: (0.72 + (offset % 9) * 0.16).toFixed(2),
+      shortFloat: `${(0.8 + (offset % 8) * 0.7).toFixed(1)}%`,
+      nextEarnings: `2026-${String(7 + (offset % 6)).padStart(2, '0')}-${String(5 + (offset * 3) % 22).padStart(2, '0')}`,
+    };
+    return { ...item, metrics: { ...metrics, ...item.metrics } };
   }
 
   getCryptoAssets(): CryptoAsset[] {
