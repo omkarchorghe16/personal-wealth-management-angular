@@ -7,75 +7,35 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
   imports: [RouterLink, RouterLinkActive],
   template: `
     <div class="shell-layout">
-      <aside class="sidebar card">
-        <div class="brand-row">
-          <div class="brand-mark">W</div>
-          <div>
-            <div class="brand-name">WealthPilot</div>
-            <div class="brand-subtitle">Focus portfolio</div>
-          </div>
-        </div>
-
-        <nav class="nav">
-          <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+      <header class="topbar">
+        <a class="brand" routerLink="/dashboard"><span class="brand-mark">↗</span><span>Folio <b>Pro</b></span></a>
+        <nav class="primary-nav" aria-label="Main navigation">
+          <a routerLink="/dashboard" routerLinkActive="active">Ideas dashboard</a>
           <a routerLink="/portfolio" routerLinkActive="active">Portfolio</a>
-          <a routerLink="/stocks" routerLinkActive="active">Stocks</a>
-          <a routerLink="/ipo" routerLinkActive="active">IPO Screen</a>
+          <a routerLink="/stocks" routerLinkActive="active">Stock screener</a>
+          <a routerLink="/ipo" routerLinkActive="active">IPO</a>
           <a routerLink="/crypto" routerLinkActive="active">Crypto</a>
-          <a routerLink="/watchlists" routerLinkActive="active">Watchlists</a>
-          <a routerLink="/profile" routerLinkActive="active">Profile</a>
-          <a routerLink="/settings" routerLinkActive="active">Settings</a>
         </nav>
-
-        <div class="sidebar-card">
-          <span>AI Insights</span>
-          <strong>Momentum +0.8%</strong>
-          <small>Risk adjusted outlook</small>
-        </div>
-      </aside>
-
-      <main class="main-panel">
-        <header class="topbar">
-          <div>
-            <span class="eyebrow">Portfolio management</span>
-            <h2>Good morning, Alex</h2>
-          </div>
-          <div class="topbar-actions">
-            <button class="ghost-btn">Search</button>
-            <button class="primary-btn">+ Add asset</button>
-          </div>
-        </header>
-
-        <ng-content></ng-content>
-      </main>
+        <div class="header-tools"><label class="search"><span>⌕</span><input aria-label="Search stocks" placeholder="Search a company, sector or brand"></label><button class="icon-btn" aria-label="Notifications">♧</button><a class="avatar" routerLink="/profile" aria-label="Profile">A</a></div>
+      </header>
+      <div class="workspace">
+        <main class="main-panel"><ng-content></ng-content></main>
+        <aside class="tool-rail" aria-label="Tracking tools">
+          <a routerLink="/dashboard">⌂<small>Ideas</small></a><a routerLink="/watchlists">☆<small>Watchlist</small></a><a routerLink="/portfolio">◷<small>Portfolio</small></a><a routerLink="/stocks">☷<small>Screener</small></a><a routerLink="/settings">⚙<small>Settings</small></a>
+        </aside>
+      </div>
     </div>
   `,
-  styles: [
-    `
-      :host { display:block; }
-      .shell-layout { display:grid; grid-template-columns: 260px 1fr; min-height: 100vh; background: linear-gradient(135deg, #071521 0%, #0d172a 100%); }
-      .sidebar { margin: 24px 0 24px 24px; padding: 22px 18px; border-radius: 30px; background: rgba(15, 23, 42, 0.8); }
-      .brand-row { display:flex; align-items:center; gap:12px; margin-bottom: 24px; }
-      .brand-mark { width: 38px; height: 38px; background: linear-gradient(135deg, #34d399, #2563eb); border-radius: 12px; display:grid; place-items:center; font-weight:800; }
-      .brand-name { font-weight:800; }
-      .brand-subtitle { color: var(--muted); font-size: 0.7rem; }
-      .nav { display:flex; flex-direction:column; gap:10px; }
-      .nav a { padding: 12px 14px; border-radius: 12px; color: var(--muted); transition: all .2s ease; }
-      .nav a.active, .nav a:hover { background: rgba(96,165,250,.12); color: var(--text); }
-      .sidebar-card { margin-top: 26px; padding: 16px; border-radius: 18px; background: linear-gradient(135deg, rgba(52,211,153,.12), rgba(37,99,235,.18)); border:1px solid var(--border); }
-      .sidebar-card span { display:block; color:var(--muted); font-size:0.74rem; text-transform:uppercase; letter-spacing:0.08em; }
-      .sidebar-card strong { display:block; margin:10px 0 4px; font-size:1.2rem; }
-      .sidebar-card small { color: var(--muted); }
-      .main-panel { padding: 24px; }
-      .topbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:20px; }
-      .eyebrow { color: var(--primary); font-size:0.76rem; letter-spacing:0.08em; text-transform: uppercase; font-weight:700; }
-      .topbar h2 { margin: 8px 0 0; font-size: clamp(1.4rem, 2vw, 2.2rem); }
-      .topbar-actions { display:flex; align-items:center; gap:12px; }
-      .ghost-btn, .primary-btn { border:none; border-radius:12px; padding: 12px 16px; font-weight:700; cursor:pointer; }
-      .ghost-btn { background: rgba(148,163,184,.08); color: var(--text); }
-      .primary-btn { background: linear-gradient(135deg, var(--primary), var(--accent)); color: #04121b; }
-      @media (max-width: 900px) { .shell-layout { grid-template-columns:1fr; } .sidebar { margin: 18px 18px 0; } .main-panel { padding: 16px 18px 28px; } .topbar { flex-direction: column; align-items:flex-start; } }
-    `,
-  ],
+  styles: [`
+    :host{display:block;min-height:100vh;background:#202023;color:#dedee6}
+    .shell-layout{min-height:100vh;background:#202023}
+    .topbar{height:54px;display:flex;align-items:center;gap:32px;padding:0 22px;background:#1e1e20;border-bottom:1px solid #36363a;position:sticky;top:0;z-index:5}
+    .brand{display:flex;align-items:center;gap:8px;white-space:nowrap;font-weight:700;letter-spacing:3px;font-size:13px}.brand b{color:#4b8cff;letter-spacing:0}.brand-mark{display:grid;place-items:center;width:22px;height:22px;border-radius:6px;background:#ffca28;color:#151515;font-size:18px;font-weight:800;letter-spacing:0}
+    .primary-nav{display:flex;align-items:center;gap:22px;margin-left:auto}.primary-nav a{font-size:12px;color:#a6a6af;white-space:nowrap}.primary-nav a.active,.primary-nav a:hover{color:#f3ce68}
+    .header-tools{display:flex;align-items:center;gap:11px}.search{height:34px;width:min(270px,25vw);display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #3b3b40;border-radius:20px;background:#29292c;color:#c5c5ce}.search input{width:100%;border:0;outline:0;background:transparent;color:#eee;font-size:11px}.search span{font-size:19px}.icon-btn,.avatar{width:30px;height:30px;border:0;border-radius:50%;display:grid;place-items:center;background:#33343a;color:#f0c94f}.avatar{background:#ffbf20;color:#2a260e;font-weight:700}
+    .workspace{display:grid;grid-template-columns:minmax(0,1fr) 52px;min-height:calc(100vh - 54px)}.main-panel{min-width:0;padding:24px clamp(18px,4vw,70px)}.tool-rail{position:sticky;top:54px;height:calc(100vh - 54px);display:flex;flex-direction:column;align-items:center;gap:15px;padding:25px 5px;background:#1e1e20;border-left:1px solid #36363a}.tool-rail a{display:grid;justify-items:center;gap:3px;color:#a4a4ab;font-size:17px}.tool-rail small{font-size:9px}
+    @media(max-width:900px){.topbar{gap:12px;padding:0 14px}.primary-nav{gap:12px}.primary-nav a{font-size:11px}.search{width:34px}.search input{display:none}.main-panel{padding:18px}.workspace{grid-template-columns:minmax(0,1fr) 42px}}
+    @media(max-width:620px){.topbar{height:auto;min-height:54px;flex-wrap:wrap;padding:10px 12px}.primary-nav{order:3;overflow:auto;width:100%;margin:0;padding:4px 0}.header-tools{margin-left:auto}.workspace{min-height:calc(100vh - 95px)}.tool-rail{top:95px;height:calc(100vh - 95px)}}
+  `],
 })
 export class ShellComponent {}

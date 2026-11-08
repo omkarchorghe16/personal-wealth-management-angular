@@ -1,46 +1,27 @@
-# WealthPilot
+# WealthPilot / Folio Pro
 
-A modern Angular personal wealth management platform for tracking investments, watchlists, portfolio performance, IPOs, crypto, and market analytics.
+An Angular prototype for a personal wealth and market research workspace. The supplied visual references inform the UI: a split-screen dark login experience and a charcoal stock research dashboard with blue highlights and warm yellow accents.
 
-## Features
+## Current prototype screens
+- Login (with a demo-only entry to sample dashboard data)
+- Ideas dashboard
+- Portfolio
+- Stock screener / sector and fundamental overview
+- IPO pipeline
+- Crypto market overview
+- Watchlists
+- Profile and settings
 
-- Authentication pages: login and registration
-- Dashboard overview with portfolio KPIs
-- Portfolio management with allocation and holdings
-- Stock market screen and sector analysis
-- IPO pipeline monitoring
-- Crypto market tracking
-- Multi-watchlist support
-- Profile and settings pages
-- Clean fintech-style dashboard UI
-- Enterprise-ready Angular structure for future Java backend integration
+All displayed prices, holdings, analysis scores, and market data are mock/sample values for UI development. They are not live financial data or investment advice. Authentication is not connected to a backend.
 
-## Tech stack
-
-- Angular 22
-- TypeScript
-- RxJS
-- SCSS
-- Standalone components
-- Angular Router
-
-## Prerequisites
-
-- Node.js 20+
-- npm 10+
-
-## Setup
+## Run locally
 
 ```bash
 npm install
 npm start
 ```
 
-Open the local app in your browser at:
-
-```text
-http://localhost:4200
-```
+Then visit `http://localhost:4200`.
 
 ## Build
 
@@ -48,44 +29,18 @@ http://localhost:4200
 npm run build
 ```
 
-## Project structure
+## Architecture
 
 ```text
-src/
-  app/
-    app.component.ts
-    app.routes.ts
-    core/
-      models/
-      services/
-    features/
-      dashboard/
-      portfolio/
-      stocks/
-      ipo/
-      crypto/
-      watchlists/
-      profile/
-      settings/
-      login/
-      register/
-    shared/
-      components/
-  styles.scss
+src/app/
+  core/models/       Typed wealth and market data
+  core/services/     Mock data service (replace behind service APIs)
+  features/          Login, dashboard, portfolio, stocks, IPO, crypto, watchlists, profile, settings
+  shared/components/ Reusable app shell and metric cards
 ```
 
-## Backend integration plan
+## Backend integration (planned)
+Connect the Angular service layer to a Java REST API only after API contracts, authentication/token lifecycle, error responses, and permissions are defined. Suggested resource areas: auth, profile, portfolios, transactions, instruments, sectors, IPOs, crypto, watchlists, and market analysis. Keep credentials and provider secrets on the backend; do not ship them in browser code.
 
-This frontend is designed to connect to a Java REST backend later. Suggested contracts:
-
-- Auth API: `/api/auth/login`, `/api/auth/register`
-- Portfolio API: `/api/portfolio`, `/api/transactions`
-- Stocks API: `/api/stocks`, `/api/sectors`, `/api/watchlists`
-- Crypto API: `/api/crypto`
-- User profile API: `/api/profile`
-
-Use environment configuration and service abstractions to replace mock data when the backend becomes available.
-
-## Notes
-
-This starter app includes mock data for local development and visual prototyping. You can refine it against your Figma design and replace placeholder content with your final product copy and data models.
+## Visual reference
+The supplied screenshot images are design references. The implementation is a first pass and can be iterated against additional Figma measurements, logo assets, and responsive/mobile screens.
