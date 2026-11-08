@@ -10,6 +10,7 @@ import {
 
 @Injectable({ providedIn: 'root' })
 export class WealthService {
+  // Prototype data only; replace these values with backend-backed service methods after API contracts are defined.
   getPortfolioSummary(): PortfolioSummary {
     return {
       totalValue: 1284600,

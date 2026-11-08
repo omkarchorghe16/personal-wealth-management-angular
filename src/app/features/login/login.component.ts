@@ -1,10 +1,11 @@
+import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [RouterLink],
+  imports: [CommonModule, RouterLink],
   template: `
     <main class="login-page">
       <section class="brand-panel" aria-label="About Folio Pro">
@@ -28,10 +29,10 @@ import { RouterLink } from '@angular/router';
           <h2>Welcome back</h2>
           <p>Sign in to your investment dashboard.</p>
           <label for="email">Email</label>
-          <input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required>
+          <input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email">
           <label for="password">Password</label>
-          <input id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required>
-          <button class="sign-in" type="submit">Sign in</button>
+          <input id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password">
+          <button class="sign-in" type="submit">Continue without signing in</button>
           <button class="demo-button" type="button" (click)="demoSignIn()">Use demo account</button>
           <p class="create-account">New here? <a routerLink="/register">Create an account</a></p>
           <p class="demo-notice" *ngIf="notice" role="status">{{ notice }}</p>
@@ -78,11 +79,11 @@ export class LoginComponent {
 
   signIn(event: Event): void {
     event.preventDefault();
-    this.notice = 'Authentication will connect to your backend. Use the demo button to preview the prototype.';
+    window.location.assign('/dashboard');
   }
 
   demoSignIn(): void {
-    // Prototype-only navigation. Replace with the Java backend auth flow before production.
+    // Prototype-only navigation; no authentication API is called.
     window.location.assign('/dashboard');
   }
 }

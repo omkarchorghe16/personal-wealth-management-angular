@@ -75,8 +75,8 @@ import { ShellComponent } from '../../shared/components/shell/shell.component';
                   <td>{{ holding.symbol }}</td>
                   <td>{{ holding.company }}</td>
                   <td>{{ holding.quantity }}</td>
-                  <td>${{ holding.avgCost }}</td>
-                  <td>${{ holding.marketValue }}</td>
+                  <td>&#36;{{ holding.avgCost }}</td>
+                  <td>&#36;{{ holding.marketValue }}</td>
                   <td>{{ holding.allocation }}%</td>
                   <td class="text-success">+{{ holding.change }}%</td>
                 </tr>

@@ -30,7 +30,7 @@ import { ShellComponent } from '../../shared/components/shell/shell.component';
               </div>
               <span class="badge" [ngClass]="asset.change >= 0 ? 'up' : 'down'">{{ asset.change > 0 ? '+' : '' }}{{ asset.change }}%</span>
             </div>
-            <div class="price">${{ asset.price.toLocaleString() }}</div>
+            <div class="price">&#36;{{ asset.price.toLocaleString() }}</div>
             <div class="meta-row">
               <span>Market cap</span><strong>{{ asset.marketCap }}</strong>
             </div>

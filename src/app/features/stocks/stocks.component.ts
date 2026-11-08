@@ -77,7 +77,7 @@ import { ShellComponent } from '../../shared/components/shell/shell.component';
                   <td>{{ stock.symbol }}</td>
                   <td>{{ stock.name }}</td>
                   <td>{{ stock.sector }}</td>
-                  <td>${{ stock.price }}</td>
+                  <td>&#36;{{ stock.price }}</td>
                   <td class="text-success">+{{ stock.change }}%</td>
                   <td>{{ stock.volume }}</td>
                   <td>{{ stock.score }}/100</td>

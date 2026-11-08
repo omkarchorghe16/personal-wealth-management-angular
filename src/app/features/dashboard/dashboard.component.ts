@@ -98,7 +98,7 @@ import { MetricCardModel, StockAsset, WatchlistItem, PortfolioSummary } from '..
                 <tbody>
                   <tr *ngFor="let stock of stocks">
                     <td>{{ stock.symbol }}</td>
-                    <td>${{ stock.price }}</td>
+                    <td>&#36;{{ stock.price }}</td>
                     <td class="text-success">+{{ stock.change }}%</td>
                     <td>{{ stock.score }}/100</td>
                   </tr>
@@ -121,7 +121,7 @@ import { MetricCardModel, StockAsset, WatchlistItem, PortfolioSummary } from '..
                   <small>{{ item.name }}</small>
                 </div>
                 <div class="watch-meta">
-                  <span>${{ item.price }}</span>
+                  <span>&#36;{{ item.price }}</span>
                   <span class="badge" [ngClass]="item.change >= 0 ? 'up' : 'down'">{{ item.change > 0 ? '+' : '' }}{{ item.change }}%</span>
                 </div>
               </div>
