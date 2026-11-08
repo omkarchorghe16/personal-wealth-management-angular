@@ -41,6 +41,10 @@ export interface WatchlistItem {
   price: number;
   change: number;
   trend: 'Bullish' | 'Neutral' | 'Bearish';
+  assetType?: string;
+  sector?: string;
+  score?: number;
+  volume?: string;
 }
 
 export interface PortfolioSummary {
@@ -49,3 +53,34 @@ export interface PortfolioSummary {
   monthlyReturn: number;
   riskScore: number;
 }
+
+export interface AssetAllocation {
+  name: string;
+  percent: number;
+}
+
+export interface CountryPortfolio {
+  country: string;
+  currency: 'USD' | 'INR';
+  totalValue: string;
+  allocations: AssetAllocation[];
+}
+
+export interface PortfolioOverview {
+  name: string;
+  country: string;
+  type: string;
+  value: string;
+  profit: string;
+  tone: 'up' | 'down';
+}
+
+export interface WatchlistGroup {
+  id: string;
+  name: string;
+  market: WatchlistMarket;
+  currency: 'USD' | 'INR';
+  items: WatchlistItem[];
+}
+
+export type WatchlistMarket = 'US' | 'India';
