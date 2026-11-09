@@ -80,6 +80,9 @@ const MAX_IMPORT_FILE_SIZE_BYTES = 5 * 1024 * 1024;
                 <button type="button" class="modal-close" aria-label="Close column editor" (click)="cancelColumnEditor()">×</button>
               </header>
               <p class="modal-description">Select the columns to show in your watchlist. Changes are applied after saving.</p>
+              <button type="button" class="tool-button" (click)="selectProfileColumns()">
+                Select all profile fields
+              </button>
               <div class="columns-editor">
                 <ng-container *ngFor="let group of columnGroups">
                   <strong class="column-group-title">{{ group }}</strong>
@@ -239,6 +242,21 @@ const MAX_IMPORT_FILE_SIZE_BYTES = 5 * 1024 * 1024;
             </section>
           </div>
 
+          <div class="modal-backdrop" *ngIf="descriptionDialogItem" (click)="closeDescriptionDialog()">
+            <section class="columns-modal description-modal" role="dialog" aria-modal="true" tabindex="-1" autofocus
+              aria-labelledby="company-description-title" (click)="$event.stopPropagation()" (keydown.escape)="closeDescriptionDialog()">
+              <header class="modal-header">
+                <div>
+                  <span class="eyebrow">{{ descriptionDialogItem.symbol }}</span>
+                  <h2 id="company-description-title">{{ descriptionDialogItem.name }}</h2>
+                </div>
+                <button type="button" class="modal-close" aria-label="Close company description"
+                  (click)="closeDescriptionDialog()">×</button>
+              </header>
+              <p class="description-content">{{ descriptionDialogItem.profileData?.['description'] || 'No company description is available.' }}</p>
+            </section>
+          </div>
+
           <p class="status-message" role="status" aria-live="polite" *ngIf="statusMessage">{{ statusMessage }}</p>
 
           <div class="table-wrap">
@@ -263,6 +281,10 @@ const MAX_IMPORT_FILE_SIZE_BYTES = 5 * 1024 * 1024;
                     </span>
                     <span *ngSwitchCase="'trend'" class="badge"
                       [ngClass]="item.trend === 'Bullish' ? 'up' : item.trend === 'Bearish' ? 'down' : 'neutral'">{{ item.trend ?? '—' }}</span>
+                    <button *ngSwitchCase="'description'" type="button" class="description-view-button"
+                      [disabled]="!item.profileData?.['description']"
+                      [attr.aria-label]="'View description for ' + item.name"
+                      (click)="openDescriptionDialog(item)">View</button>
                     <span *ngSwitchDefault>{{ getColumnValue(item, column.key) }}</span>
                   </td>
                 </tr>
@@ -337,11 +359,34 @@ export class WatchlistsComponent {
     { key: 'nextEarnings', label: 'Next earnings date', group: 'Events' },
     { key: 'currency', label: 'Currency', group: 'Profile' },
     { key: 'exchange', label: 'Exchange', group: 'Profile' },
+    { key: 'exchangeFullName', label: 'Exchange full name', group: 'Profile' },
+    { key: 'exchangeShortName', label: 'Exchange short name', group: 'Profile' },
     { key: 'country', label: 'Country', group: 'Profile' },
     { key: 'industry', label: 'Industry', group: 'Profile' },
     { key: 'description', label: 'Company description', group: 'Profile' },
     { key: 'updatedAt', label: 'Profile updated', group: 'Profile' },
     { key: 'profileId', label: 'Profile ID', group: 'Profile' },
+    { key: 'cik', label: 'CIK', group: 'Profile' },
+    { key: 'isin', label: 'ISIN', group: 'Profile' },
+    { key: 'cusip', label: 'CUSIP', group: 'Profile' },
+    { key: 'website', label: 'Website', group: 'Profile' },
+    { key: 'lastDividend', label: 'Last dividend', group: 'Profile' },
+    { key: 'priceRange', label: 'Price range', group: 'Profile' },
+    { key: 'range', label: 'Provider price range', group: 'Profile' },
+    { key: 'image', label: 'Company image URL', group: 'Profile' },
+    { key: 'ceo', label: 'CEO', group: 'Profile' },
+    { key: 'fullTimeEmployees', label: 'Full-time employees', group: 'Profile' },
+    { key: 'phone', label: 'Phone', group: 'Profile' },
+    { key: 'address', label: 'Address', group: 'Profile' },
+    { key: 'city', label: 'City', group: 'Profile' },
+    { key: 'state', label: 'State', group: 'Profile' },
+    { key: 'zip', label: 'ZIP / postal code', group: 'Profile' },
+    { key: 'ipoDate', label: 'IPO date', group: 'Profile' },
+    { key: 'activelyTrading', label: 'Actively trading', group: 'Profile' },
+    { key: 'etf', label: 'ETF', group: 'Profile' },
+    { key: 'fund', label: 'Fund', group: 'Profile' },
+    { key: 'adr', label: 'ADR', group: 'Profile' },
+    { key: 'delisted', label: 'Delisted', group: 'Profile' },
   ];
   readonly columnGroups = [...new Set(this.availableColumns.map((column) => column.group))];
   visibleColumnKeys: WatchlistColumnKey[] = ['symbol', 'name', 'assetType', 'price', 'change', 'trend'];
@@ -354,6 +399,7 @@ export class WatchlistsComponent {
   watchlistDropdownOpen = false;
   currentPage = 1;
   columnsEditorOpen = false;
+  descriptionDialogItem: WatchlistItem | null = null;
   addStocksDialogOpen = false;
   stockSearchText = '';
   stagedStocks: WatchlistItem[] = [];
@@ -660,8 +706,26 @@ export class WatchlistsComponent {
     this.persistFavorites();
   }
 
+  openDescriptionDialog(item: WatchlistItem): void {
+    if (item.profileData?.['description']) {
+      this.descriptionDialogItem = item;
+    }
+  }
+
+  closeDescriptionDialog(): void {
+    this.descriptionDialogItem = null;
+  }
+
   columnsForGroup(group: string): WatchlistColumn[] {
     return this.availableColumns.filter((column) => column.group === group);
+  }
+
+  selectProfileColumns(): void {
+    const profileKeys = this.columnsForGroup('Profile').map((column) => column.key);
+    this.draftColumnKeys = [
+      ...this.draftColumnKeys,
+      ...profileKeys.filter((key) => !this.draftColumnKeys.includes(key)),
+    ];
   }
 
   openColumnEditor(): void {
@@ -735,11 +799,34 @@ export class WatchlistsComponent {
       case 'changeAmount':
       case 'currency':
       case 'exchange':
+      case 'exchangeShortName':
+      case 'exchangeFullName':
       case 'country':
       case 'industry':
       case 'description':
       case 'updatedAt':
       case 'profileId':
+      case 'cik':
+      case 'isin':
+      case 'cusip':
+      case 'website':
+      case 'lastDividend':
+      case 'priceRange':
+      case 'range':
+      case 'image':
+      case 'ceo':
+      case 'fullTimeEmployees':
+      case 'phone':
+      case 'address':
+      case 'city':
+      case 'state':
+      case 'zip':
+      case 'ipoDate':
+      case 'activelyTrading':
+      case 'etf':
+      case 'fund':
+      case 'adr':
+      case 'delisted':
       case 'open':
       case 'previousClose':
       case 'dayHigh':
@@ -848,7 +935,11 @@ export class WatchlistsComponent {
           if (matchedItemCount > 0) {
             const profileColumns: WatchlistColumnKey[] = [
               'name', 'price', 'change', 'sector', 'volume', 'marketCap', 'changeAmount',
-              'currency', 'exchange', 'country', 'industry', 'description', 'updatedAt',
+              'currency', 'exchange', 'exchangeFullName', 'exchangeShortName', 'country', 'industry',
+              'description', 'updatedAt', 'profileId', 'cik', 'isin', 'cusip', 'website', 'beta',
+              'lastDividend', 'priceRange', 'range', 'image',
+              'averageVolume', 'ceo', 'fullTimeEmployees', 'phone', 'address', 'city', 'state',
+              'zip', 'ipoDate', 'activelyTrading', 'etf', 'fund', 'adr', 'delisted',
             ];
             this.visibleColumnKeys = [
               ...this.visibleColumnKeys,
@@ -917,7 +1008,9 @@ export class WatchlistsComponent {
 
   private applyFmpProfile(item: WatchlistItem, profile: FmpProfile): WatchlistItem {
     const rawData = this.parseRawProfilePayload(profile.rawPayload, profile.symbol);
-    const profileData = this.flattenProfileData({ ...rawData, ...profile });
+    const profileValues = Object.fromEntries(Object.entries(profile).filter(([, value]) =>
+      value !== null && value !== undefined && value !== ''));
+    const profileData = this.flattenProfileData({ ...rawData, ...profileValues });
     const metricAliases: Partial<Record<WatchlistMetricKey, string[]>> = {
       marketCap: ['marketcap', 'mktcap'],
       changeAmount: ['change'],
@@ -982,6 +1075,8 @@ export class WatchlistsComponent {
       const path = prefix ? `${prefix}.${key}` : key;
       if (typeof entry === 'string' || typeof entry === 'number') {
         data[path] = entry;
+      } else if (typeof entry === 'boolean') {
+        data[path] = entry ? 'Yes' : 'No';
       } else if (typeof entry === 'object' && !Array.isArray(entry)) {
         Object.assign(data, this.flattenProfileData(entry as Record<string, unknown>, path));
       }
