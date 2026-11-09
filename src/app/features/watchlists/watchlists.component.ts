@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { HttpErrorResponse, HttpEventType, HttpResponse } from '@angular/common/http';
 import { Component } from '@angular/core';
 import { WatchlistGroup, WatchlistItem, WatchlistMarket, WatchlistMetricKey } from '../../core/models/wealth.models';
+import { FmpProfile, FmpProfilesService } from '../../core/services/fmp-profiles.service';
 import { WatchlistImportMarket, WatchlistImportService } from '../../core/services/watchlist-import.service';
 import { WatchlistPageResponse, WatchlistsService } from '../../core/services/watchlists.service';
 import { ShellComponent } from '../../shared/components/shell/shell.component';
@@ -50,6 +51,10 @@ const MAX_IMPORT_FILE_SIZE_BYTES = 5 * 1024 * 1024;
                 {{ isImporting ? 'Importing…' : 'Import CSV' }}
               </button>
               <button class="tool-button" type="button" (click)="exportCsv()">Export CSV</button>
+              <button class="tool-button" type="button" [disabled]="isLoadingProfiles || isLoadingWatchlists"
+                (click)="loadFmpProfiles()">
+                {{ isLoadingProfiles ? 'Loading profiles…' : 'Load FMP profiles' }}
+              </button>
               <button class="tool-button" type="button" [attr.aria-expanded]="columnsEditorOpen"
                 aria-controls="columns-editor" (click)="openColumnEditor()">Edit columns</button>
             </div>
@@ -300,6 +305,7 @@ export class WatchlistsComponent {
     { key: 'dayHigh', label: 'Day high', group: 'Market data' },
     { key: 'dayLow', label: 'Day low', group: 'Market data' },
     { key: 'marketCap', label: 'Market capitalization', group: 'Market data' },
+    { key: 'changeAmount', label: 'Price change', group: 'Market data' },
     { key: 'averageVolume', label: 'Average volume', group: 'Market data' },
     { key: 'relativeVolume', label: 'Relative volume', group: 'Market data' },
     { key: 'peRatio', label: 'P/E ratio (TTM)', group: 'Fundamentals' },
@@ -329,6 +335,13 @@ export class WatchlistsComponent {
     { key: 'beta', label: 'Beta (5Y monthly)', group: 'Risk' },
     { key: 'shortFloat', label: 'Short float', group: 'Risk' },
     { key: 'nextEarnings', label: 'Next earnings date', group: 'Events' },
+    { key: 'currency', label: 'Currency', group: 'Profile' },
+    { key: 'exchange', label: 'Exchange', group: 'Profile' },
+    { key: 'country', label: 'Country', group: 'Profile' },
+    { key: 'industry', label: 'Industry', group: 'Profile' },
+    { key: 'description', label: 'Company description', group: 'Profile' },
+    { key: 'updatedAt', label: 'Profile updated', group: 'Profile' },
+    { key: 'profileId', label: 'Profile ID', group: 'Profile' },
   ];
   readonly columnGroups = [...new Set(this.availableColumns.map((column) => column.group))];
   visibleColumnKeys: WatchlistColumnKey[] = ['symbol', 'name', 'assetType', 'price', 'change', 'trend'];
@@ -351,6 +364,7 @@ export class WatchlistsComponent {
   columnEditorMessage = '';
   statusMessage = '';
   isImporting = false;
+  isLoadingProfiles = false;
   isLoadingWatchlists = false;
   watchlistPage = 0;
   watchlistTotalPages = 0;
@@ -361,6 +375,7 @@ export class WatchlistsComponent {
   constructor(
     private readonly watchlistImportService: WatchlistImportService,
     private readonly watchlistsService: WatchlistsService,
+    private readonly fmpProfilesService: FmpProfilesService,
   ) {
     this.loadFavorites();
     this.loadColumnPreferences();
@@ -717,6 +732,14 @@ export class WatchlistsComponent {
       case 'sector': return item.sector ?? '—';
       case 'score': return item.score ?? '—';
       case 'volume': return item.volume ?? '—';
+      case 'changeAmount':
+      case 'currency':
+      case 'exchange':
+      case 'country':
+      case 'industry':
+      case 'description':
+      case 'updatedAt':
+      case 'profileId':
       case 'open':
       case 'previousClose':
       case 'dayHigh':
@@ -751,7 +774,7 @@ export class WatchlistsComponent {
       case 'beta':
       case 'shortFloat':
       case 'nextEarnings':
-        return item.metrics?.[key] ?? '—';
+        return item.metrics?.[key] ?? this.profileMetric(item, key) ?? '—';
     }
   }
 
@@ -772,6 +795,244 @@ export class WatchlistsComponent {
   nextWatchlistPage(): void {
     if (this.watchlistPage + 1 < this.watchlistTotalPages) {
       this.loadWatchlists(this.selectedMarket, this.watchlistPage + 1);
+    }
+  }
+
+  loadFmpProfiles(): void {
+    if (this.selectedMarket !== 'US') {
+      this.statusMessage = 'FMP Basic profiles are available only for US-exchange symbols.';
+      return;
+    }
+    const watchlist = this.selectedWatchlist;
+    const symbols = [...new Set(watchlist.items
+      .map((item) => item.symbol.trim().toUpperCase())
+      .filter((symbol) => symbol && !/(\.NS|\.BO)$/i.test(symbol)))];
+    if (!symbols.length) {
+      this.statusMessage = 'The selected watchlist has no supported US symbols to look up.';
+      return;
+    }
+
+    const selectedWatchlistId = this.selectedWatchlistId;
+    const selectedMarket = this.selectedMarket;
+    this.isLoadingProfiles = true;
+    this.statusMessage = `Loading FMP profiles for ${symbols.length} symbols…`;
+    this.fmpProfilesService.getProfiles(symbols).subscribe({
+      next: (result) => {
+        try {
+          const profiles = this.parseFmpProfiles(result);
+          if (selectedMarket !== this.selectedMarket || selectedWatchlistId !== this.selectedWatchlistId) {
+            this.statusMessage = 'Profiles loaded, but the selected watchlist changed before the response arrived. Select the original watchlist and load profiles again.';
+            return;
+          }
+          const profilesBySymbol = new Map(profiles.map((profile) => [profile.symbol.trim().toUpperCase(), profile]));
+          const isFavoritesSelection = selectedWatchlistId === this.favoritesListId;
+          const matchedItemCount = this.watchlists
+            .filter((list) => isFavoritesSelection ? list.market === 'US' : list.id === selectedWatchlistId)
+            .flatMap((list) => list.items)
+            .filter((item) => profilesBySymbol.has(item.symbol.trim().toUpperCase())).length;
+          const matchedSymbols = [...profilesBySymbol.keys()].filter((symbol) =>
+            this.watchlists
+              .filter((list) => isFavoritesSelection ? list.market === 'US' : list.id === selectedWatchlistId)
+              .some((list) => list.items.some((item) => item.symbol.trim().toUpperCase() === symbol)));
+          this.watchlists = this.watchlists.map((list) => (selectedWatchlistId === this.favoritesListId
+            ? list.market === 'US'
+            : list.id === selectedWatchlistId)
+            ? {
+              ...list,
+              items: list.items.map((item) => {
+                const profile = profilesBySymbol.get(item.symbol.trim().toUpperCase());
+                return profile ? this.applyFmpProfile(item, profile) : item;
+              }),
+            }
+            : list);
+          if (matchedItemCount > 0) {
+            const profileColumns: WatchlistColumnKey[] = [
+              'name', 'price', 'change', 'sector', 'volume', 'marketCap', 'changeAmount',
+              'currency', 'exchange', 'country', 'industry', 'description', 'updatedAt',
+            ];
+            this.visibleColumnKeys = [
+              ...this.visibleColumnKeys,
+              ...profileColumns.filter((key) => !this.visibleColumnKeys.includes(key)),
+            ];
+          }
+          const returnedSymbols = new Set(profilesBySymbol.keys());
+          const missingSymbols = symbols.filter((symbol) => !returnedSymbols.has(symbol));
+          const displayedProfileFields = [
+            'companyName', 'price', 'changePercentage', 'marketCap', 'currency', 'exchange',
+            'country', 'sector', 'industry', 'volume', 'description', 'updatedAt',
+          ].filter((field) => profiles.some((profile) => {
+            const value = profile[field as keyof FmpProfile];
+            return value !== undefined && value !== null && value !== '';
+          }));
+          console.info('[FMP Profiles] Watchlist mapping complete', {
+            selectedWatchlist: this.selectedWatchlist.name,
+            requestedProfileCount: symbols.length,
+            receivedProfileCount: profiles.length,
+            matchedRowCount: matchedItemCount,
+            matchedSymbols,
+            requestedWithoutProfiles: missingSymbols,
+            profileFieldsWithValues: displayedProfileFields,
+            visibleColumns: this.visibleColumnKeys,
+          });
+          this.statusMessage = `Received ${profiles.length} of ${symbols.length} requested profiles; updated ${matchedItemCount} matching watchlist rows.`
+            + (missingSymbols.length ? ` No profile returned for: ${missingSymbols.join(', ')}.` : '');
+          if (profiles.length > 0 && matchedItemCount === 0) {
+            this.statusMessage += ' Returned profile symbols did not match items in the selected watchlist.';
+            console.warn('[FMP Profiles] No returned profile symbols matched items in the selected watchlist.', {
+              requestedSymbols: symbols,
+              returnedSymbols: [...returnedSymbols],
+            });
+          } else if (matchedItemCount > 0 && displayedProfileFields.length === 0) {
+            this.statusMessage += ' Profiles matched symbols, but the response has no values for the supported display fields.';
+            console.warn('[FMP Profiles] Profiles matched rows but supported display fields are empty.', {
+              returnedSymbols: [...returnedSymbols],
+            });
+          }
+        } catch (error) {
+          console.error('[FMP Profiles] Invalid response or profile data', error);
+          this.statusMessage = error instanceof Error ? error.message : 'The profile service returned invalid data.';
+        } finally {
+          this.isLoadingProfiles = false;
+        }
+      },
+      error: (error: unknown) => {
+        console.error('[FMP Profiles] Unable to load profiles', error);
+        this.statusMessage = this.fmpProfileErrorMessage(error);
+        this.isLoadingProfiles = false;
+      },
+    });
+  }
+
+  private parseFmpProfiles(result: unknown): FmpProfile[] {
+    if (!Array.isArray(result)) {
+      throw new Error('The profile service returned an unexpected response. Expected an array of profiles.');
+    }
+    return result.map((entry, index) => {
+      if (typeof entry !== 'object' || entry === null || !('symbol' in entry) || typeof entry.symbol !== 'string') {
+        throw new Error(`The profile service returned an invalid profile at position ${index + 1}.`);
+      }
+      return entry as FmpProfile;
+    });
+  }
+
+  private applyFmpProfile(item: WatchlistItem, profile: FmpProfile): WatchlistItem {
+    const rawData = this.parseRawProfilePayload(profile.rawPayload, profile.symbol);
+    const profileData = this.flattenProfileData({ ...rawData, ...profile });
+    const metricAliases: Partial<Record<WatchlistMetricKey, string[]>> = {
+      marketCap: ['marketcap', 'mktcap'],
+      changeAmount: ['change'],
+      currency: ['currency'],
+      exchange: ['exchange', 'exchangeshortname'],
+      country: ['country'],
+      industry: ['industry'],
+      description: ['description'],
+      updatedAt: ['updatedat'],
+      profileId: ['id'],
+      averageVolume: ['averagevolume', 'volavg'],
+      beta: ['beta'],
+    };
+    const metrics: Partial<Record<WatchlistMetricKey, string | number>> = { ...item.metrics };
+    for (const [metric, aliases] of Object.entries(metricAliases) as [WatchlistMetricKey, string[]][]) {
+      const match = Object.entries(profileData).find(([key]) => aliases.includes(this.normalizeProfileKey(key)));
+      if (match) {
+        metrics[metric] = match[1];
+      }
+    }
+    const price = this.profileNumber(profile.price ?? rawData['price']);
+    const changePercentage = this.profileNumber(profile.changePercentage ?? rawData['changesPercentage'] ?? rawData['changePercentage']);
+    const companyName = this.profileString(profile.companyName ?? rawData['companyName']);
+    const sector = this.profileString(profile.sector ?? rawData['sector']);
+    const volume = this.profileNumber(profile.volume ?? rawData['volume']);
+    return {
+      ...item,
+      symbol: profile.symbol.toUpperCase(),
+      name: companyName ?? item.name,
+      price: price ?? item.price,
+      change: changePercentage ?? item.change,
+      sector: sector ?? item.sector,
+      volume: volume === undefined ? item.volume : String(volume),
+      metrics,
+      profileData,
+    };
+  }
+
+  private parseRawProfilePayload(rawPayload: unknown, symbol: string): Record<string, unknown> {
+    if (typeof rawPayload === 'string') {
+      try {
+        const parsed: unknown = JSON.parse(rawPayload);
+        return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+          ? parsed as Record<string, unknown>
+          : {};
+      } catch (error) {
+        console.warn(`[FMP Profiles] Could not parse rawPayload for ${symbol}`, error);
+        return {};
+      }
+    }
+    return typeof rawPayload === 'object' && rawPayload !== null && !Array.isArray(rawPayload)
+      ? rawPayload as Record<string, unknown>
+      : {};
+  }
+
+  private flattenProfileData(value: Record<string, unknown>, prefix = ''): Record<string, string | number> {
+    const data: Record<string, string | number> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === 'rawPayload' || entry === null || entry === undefined) {
+        continue;
+      }
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (typeof entry === 'string' || typeof entry === 'number') {
+        data[path] = entry;
+      } else if (typeof entry === 'object' && !Array.isArray(entry)) {
+        Object.assign(data, this.flattenProfileData(entry as Record<string, unknown>, path));
+      }
+    }
+    return data;
+  }
+
+  private normalizeProfileKey(key: string): string {
+    return key.split('.').pop()?.replace(/[^a-z0-9]/gi, '').toLowerCase() ?? '';
+  }
+
+  private profileMetric(item: WatchlistItem, key: WatchlistMetricKey): string | number | undefined {
+    const aliases: Partial<Record<WatchlistMetricKey, string[]>> = {
+      marketCap: ['mktcap'],
+      averageVolume: ['volavg'],
+      analystTarget: ['analysttargetprice'],
+      nextEarnings: ['earningsannouncement'],
+    };
+    const acceptedKeys = [this.normalizeProfileKey(key), ...(aliases[key] ?? [])];
+    const entry = Object.entries(item.profileData ?? {}).find(([profileKey]) =>
+      acceptedKeys.includes(this.normalizeProfileKey(profileKey)));
+    return entry?.[1];
+  }
+
+  private profileNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  }
+
+  private profileString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value : undefined;
+  }
+
+  private fmpProfileErrorMessage(error: unknown): string {
+    if (!(error instanceof HttpErrorResponse)) {
+      return error instanceof Error ? error.message : 'Unable to load FMP profiles.';
+    }
+    switch (error.status) {
+      case 0: return 'Could not reach the FMP profile service. Check the backend on port 8082.';
+      case 400: return 'The profile request contains an invalid or unsupported symbol. Only US-exchange symbols are supported.';
+      case 404: return 'The profile service did not find a profile for one or more requested symbols.';
+      case 429: return 'The FMP daily request quota has been exhausted. Try again after the quota resets.';
+      case 502: return 'The profile backend could not retrieve data from FMP. Try again later.';
+      case 503: return 'The FMP profile service is not configured on the backend.';
+      default: return `Unable to load FMP profiles (HTTP ${error.status}).`;
     }
   }
 

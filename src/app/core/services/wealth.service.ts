@@ -213,7 +213,7 @@ export class WealthService {
     const price = item.price ?? 0;
     const change = item.change ?? 0;
     const offset = index + 1;
-    const metrics: Record<WatchlistMetricKey, string | number> = {
+    const metrics: Partial<Record<WatchlistMetricKey, string | number>> = {
       open: price * (1 - change / 1000),
       previousClose: price / (1 + change / 100),
       dayHigh: price * 1.015,

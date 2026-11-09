@@ -46,6 +46,7 @@ export interface WatchlistItem {
   score?: number;
   volume?: string;
   metrics?: Partial<Record<WatchlistMetricKey, string | number>>;
+  profileData?: Record<string, string | number>;
 }
 
 export type WatchlistMetricKey =
@@ -82,7 +83,15 @@ export type WatchlistMetricKey =
   | 'macdSignal'
   | 'beta'
   | 'shortFloat'
-  | 'nextEarnings';
+  | 'nextEarnings'
+  | 'changeAmount'
+  | 'currency'
+  | 'exchange'
+  | 'country'
+  | 'industry'
+  | 'description'
+  | 'updatedAt'
+  | 'profileId';
 
 export interface PortfolioSummary {
   totalValue: number;

@@ -67,7 +67,8 @@
               "buildTarget": "personal-wealth-management-angular:build:production"
             },
             "development": {
-              "buildTarget": "personal-wealth-management-angular:build:development"
+              "buildTarget": "personal-wealth-management-angular:build:development",
+              "proxyConfig": "proxy.conf.json"
             }
           },
           "defaultConfiguration": "development"
