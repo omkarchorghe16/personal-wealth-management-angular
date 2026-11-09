@@ -210,11 +210,12 @@ export class WealthService {
   }
 
   private withSampleMetrics(item: WatchlistItem, index: number, currency: 'USD' | 'INR'): WatchlistItem {
-    const price = item.price;
+    const price = item.price ?? 0;
+    const change = item.change ?? 0;
     const offset = index + 1;
     const metrics: Record<WatchlistMetricKey, string | number> = {
-      open: price * (1 - item.change / 1000),
-      previousClose: price / (1 + item.change / 100),
+      open: price * (1 - change / 1000),
+      previousClose: price / (1 + change / 100),
       dayHigh: price * 1.015,
       dayLow: price * 0.985,
       marketCap: currency === 'USD' ? `$${(price * (140 + offset * 19)).toLocaleString('en-US', { maximumFractionDigits: 0 })}M` : `₹${(price * (16 + offset * 3)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}Cr`,
@@ -242,8 +243,8 @@ export class WealthService {
       movingAverage50: (price * (0.97 + offset * 0.004)).toFixed(2),
       movingAverage200: (price * (0.89 + offset * 0.006)).toFixed(2),
       rsi14: (38 + (offset * 7) % 45).toFixed(1),
-      macd: ((item.change / 100) * price).toFixed(3),
-      macdSignal: ((item.change / 120) * price).toFixed(3),
+      macd: ((change / 100) * price).toFixed(3),
+      macdSignal: ((change / 120) * price).toFixed(3),
       beta: (0.72 + (offset % 9) * 0.16).toFixed(2),
       shortFloat: `${(0.8 + (offset % 8) * 0.7).toFixed(1)}%`,
       nextEarnings: `2026-${String(7 + (offset % 6)).padStart(2, '0')}-${String(5 + (offset * 3) % 22).padStart(2, '0')}`,

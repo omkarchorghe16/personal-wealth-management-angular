@@ -38,9 +38,9 @@ export interface Holding {
 export interface WatchlistItem {
   symbol: string;
   name: string;
-  price: number;
-  change: number;
-  trend: 'Bullish' | 'Neutral' | 'Bearish';
+  price?: number;
+  change?: number;
+  trend?: 'Bullish' | 'Neutral' | 'Bearish';
   assetType?: string;
   sector?: string;
   score?: number;

@@ -1,7 +1,9 @@
 import { CommonModule } from '@angular/common';
+import { HttpErrorResponse, HttpEventType, HttpResponse } from '@angular/common/http';
 import { Component } from '@angular/core';
 import { WatchlistGroup, WatchlistItem, WatchlistMarket, WatchlistMetricKey } from '../../core/models/wealth.models';
-import { WealthService } from '../../core/services/wealth.service';
+import { WatchlistImportMarket, WatchlistImportService } from '../../core/services/watchlist-import.service';
+import { WatchlistPageResponse, WatchlistsService } from '../../core/services/watchlists.service';
 import { ShellComponent } from '../../shared/components/shell/shell.component';
 
 type WatchlistColumnKey = 'symbol' | 'name' | 'assetType' | 'price' | 'change' | 'trend' | 'sector' | 'score' | 'volume' | WatchlistMetricKey;
@@ -15,8 +17,8 @@ interface WatchlistColumn {
 const FAVORITE_WATCHLISTS_STORAGE_KEY = 'folio-pro.favorite-watchlists';
 const FAVORITE_SYMBOLS_STORAGE_KEY = 'folio-pro.favorite-symbols';
 const WATCHLIST_COLUMNS_STORAGE_KEY = 'folio-pro.watchlist-columns';
-const WATCHLIST_DATA_STORAGE_KEY = 'folio-pro.watchlist-data';
 const FAVORITES_LIST_ID = '__favorites__';
+const MAX_IMPORT_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 
 @Component({
   selector: 'app-watchlists',
@@ -30,7 +32,7 @@ const FAVORITES_LIST_ID = '__favorites__';
             <h1>Watchlists</h1>
             <p>Monitor US and India assets from one page using the same watchlist workflow.</p>
           </div>
-          <span class="sample-note">Prototype · illustrative sample data</span>
+          <span class="sample-note">Prices and market metrics are not provided by the watchlist service.</span>
         </div>
 
         <section class="card watchlist-panel">
@@ -43,8 +45,10 @@ const FAVORITES_LIST_ID = '__favorites__';
             </div>
             <div class="actions">
               <input #fileInput class="file-input" type="file" accept=".csv,text/csv"
-                aria-label="Choose watchlist CSV to import" (change)="importCsv($event)">
-              <button class="tool-button" type="button" (click)="fileInput.click()">Import CSV</button>
+                aria-label="Choose watchlist CSV to import" [disabled]="isImporting" (change)="importCsv($event)">
+              <button class="tool-button" type="button" [disabled]="isImporting" (click)="fileInput.click()">
+                {{ isImporting ? 'Importing…' : 'Import CSV' }}
+              </button>
               <button class="tool-button" type="button" (click)="exportCsv()">Export CSV</button>
               <button class="tool-button" type="button" [attr.aria-expanded]="columnsEditorOpen"
                 aria-controls="columns-editor" (click)="openColumnEditor()">Edit columns</button>
@@ -108,9 +112,10 @@ const FAVORITES_LIST_ID = '__favorites__';
                 <button id="watchlist-select" type="button" class="watchlist-select-button"
                   aria-labelledby="watchlist-select-label" [attr.aria-expanded]="watchlistDropdownOpen"
                   aria-haspopup="listbox" (click)="watchlistDropdownOpen = !watchlistDropdownOpen">
-                  <span>{{ selectedWatchlist.name }}</span><span class="dropdown-chevron" aria-hidden="true">⌄</span>
+                <span>{{ selectedWatchlist.name }}</span><span class="dropdown-chevron" aria-hidden="true">⌄</span>
                 </button>
                 <div class="watchlist-menu" role="listbox" *ngIf="watchlistDropdownOpen">
+                  <p class="watchlist-loading" *ngIf="isLoadingWatchlists" role="status">Loading watchlists…</p>
                   <button *ngIf="hasFavoriteSymbols" type="button" class="watchlist-option"
                     [class.active]="isFavoritesList" role="option" [attr.aria-selected]="isFavoritesList"
                     (click)="selectWatchlist(favoritesListId)">
@@ -132,9 +137,16 @@ const FAVORITES_LIST_ID = '__favorites__';
                        (click)="toggleFavoriteWatchlist(watchlist)">{{ isFavoriteWatchlist(watchlist) ? '★' : '☆' }}</button>
                   </div>
                   <button type="button" class="watchlist-option add-watchlist-option" role="option"
-                    aria-selected="false" (click)="openAddWatchlistDialog()">
+                    aria-selected="false" [disabled]="isLoadingWatchlists" (click)="openAddWatchlistDialog()">
                     <span class="option-name"><span aria-hidden="true">＋</span> Add watchlist</span>
                   </button>
+                  <div class="watchlist-page-controls" *ngIf="watchlistTotalPages > 1" aria-label="Watchlist pages">
+                    <button type="button" (click)="previousWatchlistPage()"
+                      [disabled]="isLoadingWatchlists || watchlistPage === 0">Previous</button>
+                    <span>Page {{ watchlistPage + 1 }} of {{ watchlistTotalPages }}</span>
+                    <button type="button" (click)="nextWatchlistPage()"
+                      [disabled]="isLoadingWatchlists || watchlistPage + 1 >= watchlistTotalPages">Next</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -240,17 +252,19 @@ const FAVORITES_LIST_ID = '__favorites__';
                         [attr.aria-label]="isFavoriteSymbol(item) ? 'Remove ' + item.symbol + ' from favorites' : 'Add ' + item.symbol + ' to favorites'"
                         (click)="toggleFavoriteSymbol(item)">{{ isFavoriteSymbol(item) ? '★' : '☆' }}</button>
                     </span>
-                    <span *ngSwitchCase="'price'">{{ item.price | currency:selectedWatchlist.currency:'symbol':'1.2-2' }}</span>
-                    <span *ngSwitchCase="'change'" [ngClass]="item.change >= 0 ? 'text-success' : 'text-danger'">
-                      {{ item.change > 0 ? '+' : '' }}{{ item.change }}%
+                    <span *ngSwitchCase="'price'">{{ item.price === undefined ? '—' : (item.price | currency:selectedWatchlist.currency:'symbol':'1.2-2') }}</span>
+                    <span *ngSwitchCase="'change'" [ngClass]="item.change === undefined ? '' : item.change >= 0 ? 'text-success' : 'text-danger'">
+                      {{ item.change === undefined ? '—' : (item.change > 0 ? '+' : '') + item.change + '%' }}
                     </span>
                     <span *ngSwitchCase="'trend'" class="badge"
-                      [ngClass]="item.trend === 'Bullish' ? 'up' : item.trend === 'Bearish' ? 'down' : 'neutral'">{{ item.trend }}</span>
+                      [ngClass]="item.trend === 'Bullish' ? 'up' : item.trend === 'Bearish' ? 'down' : 'neutral'">{{ item.trend ?? '—' }}</span>
                     <span *ngSwitchDefault>{{ getColumnValue(item, column.key) }}</span>
                   </td>
                 </tr>
                 <tr *ngIf="paginatedItems.length === 0">
-                  <td [attr.colspan]="visibleColumns.length" class="empty-state">No assets in this watchlist.</td>
+                  <td [attr.colspan]="visibleColumns.length" class="empty-state">
+                    {{ isLoadingWatchlists ? 'Loading watchlist items…' : 'No assets in this watchlist.' }}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -320,7 +334,6 @@ export class WatchlistsComponent {
   visibleColumnKeys: WatchlistColumnKey[] = ['symbol', 'name', 'assetType', 'price', 'change', 'trend'];
   draftColumnKeys: WatchlistColumnKey[] = [];
   watchlists: WatchlistGroup[] = [];
-  private readonly watchlistsByMarket: Partial<Record<WatchlistMarket, WatchlistGroup[]>> = {};
   private favoriteWatchlistKeys = new Set<string>();
   private favoriteSymbolsByMarket: Record<WatchlistMarket, Set<string>> = { US: new Set(), India: new Set() };
   selectedMarket: WatchlistMarket = 'US';
@@ -337,9 +350,18 @@ export class WatchlistsComponent {
   newWatchlistMessage = '';
   columnEditorMessage = '';
   statusMessage = '';
+  isImporting = false;
+  isLoadingWatchlists = false;
+  watchlistPage = 0;
+  watchlistTotalPages = 0;
+  private watchlistRequestId = 0;
+  private readonly watchlistPageSize = 15;
   readonly favoritesListId = FAVORITES_LIST_ID;
 
-  constructor(private readonly wealthService: WealthService) {
+  constructor(
+    private readonly watchlistImportService: WatchlistImportService,
+    private readonly watchlistsService: WatchlistsService,
+  ) {
     this.loadFavorites();
     this.loadColumnPreferences();
     this.loadWatchlists(this.selectedMarket);
@@ -358,7 +380,15 @@ export class WatchlistsComponent {
             && items.findIndex((candidate) => candidate.symbol === item.symbol) === index),
       };
     }
-    return this.watchlists.find((watchlist) => watchlist.id === this.selectedWatchlistId) ?? this.watchlists[0];
+    return this.watchlists.find((watchlist) => watchlist.id === this.selectedWatchlistId)
+      ?? this.watchlists[0]
+      ?? {
+        id: '',
+        name: this.isLoadingWatchlists ? 'Loading watchlists…' : 'No watchlists',
+        market: this.selectedMarket,
+        currency: this.selectedMarket === 'US' ? 'USD' : 'INR',
+        items: [],
+      };
   }
 
   get favoriteWatchlists(): WatchlistGroup[] {
@@ -418,7 +448,8 @@ export class WatchlistsComponent {
   selectMarket(market: WatchlistMarket): void {
     if (market !== this.selectedMarket) {
       this.selectedMarket = market;
-      this.loadWatchlists(market);
+      this.watchlistPage = 0;
+      this.loadWatchlists(market, 0);
       this.statusMessage = '';
     }
   }
@@ -564,13 +595,11 @@ export class WatchlistsComponent {
       items: [],
     };
     this.watchlists = [...this.watchlists, newWatchlist];
-    this.watchlistsByMarket[this.selectedMarket] = this.watchlists;
     this.selectedWatchlistId = newWatchlist.id;
     this.currentPage = 1;
-    this.persistWatchlists();
     this.addWatchlistDialogOpen = false;
     this.newWatchlistMessage = '';
-    this.statusMessage = `${name} created. Use Add stocks to add symbols to this watchlist.`;
+    this.statusMessage = `${name} added in this session. This backend currently only supports loading and importing watchlists.`;
   }
 
   saveStagedStocks(): void {
@@ -584,14 +613,12 @@ export class WatchlistsComponent {
     const updatedWatchlists = this.watchlists.map((watchlist) =>
       watchlist.id === updatedWatchlist.id ? updatedWatchlist : watchlist,
     );
-    this.watchlistsByMarket[this.selectedMarket] = updatedWatchlists;
     this.watchlists = updatedWatchlists;
-    this.persistWatchlists();
     const addedCount = this.stagedStocks.length;
     this.currentPage = Math.ceil(updatedWatchlist.items.length / this.pageSize);
     this.stagedStocks = [];
     this.addStocksDialogOpen = false;
-    this.statusMessage = `${addedCount} ${addedCount === 1 ? 'stock' : 'stocks'} saved to ${updatedWatchlist.name}.`;
+    this.statusMessage = `${addedCount} ${addedCount === 1 ? 'stock' : 'stocks'} added to ${updatedWatchlist.name} for this session only.`;
   }
 
   columnLabel(key: WatchlistColumnKey): string {
@@ -684,9 +711,9 @@ export class WatchlistsComponent {
       case 'symbol': return item.symbol;
       case 'name': return item.name;
       case 'assetType': return item.assetType ?? '—';
-      case 'price': return item.price;
-      case 'change': return item.change;
-      case 'trend': return item.trend;
+      case 'price': return item.price ?? '—';
+      case 'change': return item.change ?? '—';
+      case 'trend': return item.trend ?? '—';
       case 'sector': return item.sector ?? '—';
       case 'score': return item.score ?? '—';
       case 'volume': return item.volume ?? '—';
@@ -736,12 +763,24 @@ export class WatchlistsComponent {
     this.currentPage = Math.min(this.totalPages, this.currentPage + 1);
   }
 
+  previousWatchlistPage(): void {
+    if (this.watchlistPage > 0) {
+      this.loadWatchlists(this.selectedMarket, this.watchlistPage - 1);
+    }
+  }
+
+  nextWatchlistPage(): void {
+    if (this.watchlistPage + 1 < this.watchlistTotalPages) {
+      this.loadWatchlists(this.selectedMarket, this.watchlistPage + 1);
+    }
+  }
+
   exportCsv(): void {
-    const headers = this.availableColumns.map((column) => column.key);
-    const rows = this.selectedWatchlist.items.map((item) =>
-      headers.map((header) => this.csvEscape(String(this.getColumnValue(item, header)))),
-    );
-    const csv = [headers.join(','), ...rows.map((row) => row.join(','))].join('\r\n');
+    const records = [
+      [this.selectedWatchlist.name],
+      ...this.selectedWatchlist.items.map((item) => [item.symbol]),
+    ];
+    const csv = records.map((record) => record.map((value) => this.csvEscape(value)).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -760,102 +799,147 @@ export class WatchlistsComponent {
     if (!file) {
       return;
     }
-    if (this.isFavoritesList) {
-      this.statusMessage = 'Choose an individual watchlist before importing assets.';
+    if (file.size > MAX_IMPORT_FILE_SIZE_BYTES) {
+      this.statusMessage = 'CSV files must be 5 MB or smaller.';
       input.value = '';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const importedItems = this.parseCsv(String(reader.result ?? ''));
-        const updatedWatchlist = {
-          ...this.selectedWatchlist,
-          items: [...this.selectedWatchlist.items, ...importedItems],
-        };
-        this.watchlistsByMarket[this.selectedMarket] = this.watchlistsByMarket[this.selectedMarket]?.map((watchlist) =>
-          watchlist.id === updatedWatchlist.id ? updatedWatchlist : watchlist,
-        );
-        this.watchlists = this.watchlists.map((watchlist) =>
-          watchlist.id === updatedWatchlist.id ? updatedWatchlist : watchlist,
-        );
-        this.persistWatchlists();
-        this.currentPage = Math.ceil(updatedWatchlist.items.length / this.pageSize);
-        this.statusMessage = `${importedItems.length} assets imported into ${updatedWatchlist.name}.`;
-      } catch (error) {
-        this.statusMessage = error instanceof Error ? error.message : 'Unable to import this CSV file.';
-      } finally {
+    const market: WatchlistImportMarket = this.selectedMarket === 'US' ? 'USA' : 'India';
+    this.isImporting = true;
+    this.statusMessage = `Uploading ${file.name} to ${market} watchlists…`;
+    this.watchlistImportService.importWatchlists(file, market).subscribe({
+      next: (event) => {
+        if (event.type === HttpEventType.UploadProgress) {
+          const percent = event.total ? Math.round((event.loaded / event.total) * 100) : undefined;
+          this.statusMessage = percent === undefined
+            ? `Uploading ${file.name} to ${market} watchlists…`
+            : `Uploading ${file.name}: ${percent}%`;
+          return;
+        }
+        if (event instanceof HttpResponse) {
+          const response = event.body;
+          if (!response) {
+            this.statusMessage = 'The server returned an empty import response. Check the backend logs.';
+            console.error('[Watchlist CSV Import] Server returned an empty response body', {
+              status: event.status,
+              url: event.url,
+            });
+          } else {
+            const names = response.watchlistNames.length ? ` Watchlists: ${response.watchlistNames.join(', ')}.` : '';
+            this.statusMessage = `Imported ${response.watchlistsCreated} watchlists and ${response.itemsCreated} symbols into ${market}.${names}`;
+            this.loadWatchlists(this.selectedMarket, this.watchlistPage, true);
+          }
+          this.isImporting = false;
+          input.value = '';
+        }
+      },
+      error: (error: unknown) => {
+        this.statusMessage = this.importErrorMessage(error);
+        console.error('[Watchlist CSV Import] UI import failed', error);
+        this.isImporting = false;
         input.value = '';
-      }
-    };
-    reader.onerror = () => {
-      this.statusMessage = 'Unable to read this CSV file.';
-      input.value = '';
-    };
-    reader.readAsText(file);
+      },
+      complete: () => {
+        if (this.isImporting) {
+          this.statusMessage = 'The upload ended without a server response. Check the browser console and backend logs.';
+          console.error('[Watchlist CSV Import] Request completed without a response event');
+          this.isImporting = false;
+          input.value = '';
+        }
+      },
+    });
   }
 
-  private loadWatchlists(market: WatchlistMarket): void {
-    // Both markets share this loader; replace its service source with one parameterized backend call later.
-    if (!this.watchlistsByMarket[market]) {
-      const sampleLists = this.wealthService.getWatchlists(market);
-      const savedLists = this.readPersistedWatchlists()[market] ?? [];
-      const savedById = new Map(savedLists.map((watchlist) => [watchlist.id, watchlist]));
-      const sampleIds = new Set(sampleLists.map((watchlist) => watchlist.id));
-      const savedSampleLists = sampleLists.map((sampleList) => savedById.get(sampleList.id) ?? sampleList);
-      const customLists = savedLists.filter((watchlist) => !sampleIds.has(watchlist.id));
-      this.watchlistsByMarket[market] = [...savedSampleLists, ...customLists];
+  private importErrorMessage(error: unknown): string {
+    if (!(error instanceof HttpErrorResponse)) {
+      return error instanceof Error && error.name === 'TimeoutError'
+        ? 'The server did not respond within 120 seconds. Check that the backend is running and inspect its logs.'
+        : error instanceof Error ? error.message : 'Unable to import this CSV file.';
     }
-    this.watchlists = this.watchlistsByMarket[market] ?? [];
-    this.selectedWatchlistId = this.watchlists[0]?.id ?? '';
+    if (error.status === 0) {
+      return 'Unable to reach the watchlist service. Check that the backend is running and try again.';
+    }
+    if (error.status === 413) {
+      return 'The CSV file is larger than the 5 MB limit.';
+    }
+    const payload: unknown = error.error;
+    if (typeof payload === 'string' && payload.trim()) {
+      return payload;
+    }
+    if (typeof payload === 'object' && payload !== null) {
+      const errorPayload = payload as Record<string, unknown>;
+      for (const key of ['message', 'error', 'detail', 'title']) {
+        const message = errorPayload[key];
+        if (typeof message === 'string' && message.trim()) {
+          return message;
+        }
+      }
+    }
+    if (error.status === 400) {
+      return 'The CSV could not be imported. Check the watchlist names, symbols, and CSV format.';
+    }
+    return `Unable to import this CSV file (HTTP ${error.status}).`;
+  }
+
+  private loadWatchlists(market: WatchlistMarket, page = 0, preserveStatusMessage = false): void {
+    const requestId = ++this.watchlistRequestId;
+    this.isLoadingWatchlists = true;
+    this.watchlistPage = page;
+    this.watchlists = [];
+    this.selectedWatchlistId = '';
+    this.watchlistTotalPages = 0;
     this.currentPage = 1;
-  }
-
-  private persistWatchlists(): void {
-    const savedLists = this.readPersistedWatchlists();
-    savedLists[this.selectedMarket] = this.watchlists;
-    localStorage.setItem(WATCHLIST_DATA_STORAGE_KEY, JSON.stringify(savedLists));
-  }
-
-  private readPersistedWatchlists(): Partial<Record<WatchlistMarket, WatchlistGroup[]>> {
-    const value = localStorage.getItem(WATCHLIST_DATA_STORAGE_KEY);
-    if (!value) {
-      return {};
+    if (!preserveStatusMessage) {
+      this.statusMessage = '';
     }
-    try {
-      const parsed: unknown = JSON.parse(value);
-      if (typeof parsed !== 'object' || parsed === null) {
-        return {};
-      }
-      const record = parsed as Record<string, unknown>;
-      return {
-        US: this.isWatchlistArray(record['US'], 'US') ? record['US'] : undefined,
-        India: this.isWatchlistArray(record['India'], 'India') ? record['India'] : undefined,
-      };
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        return {};
-      }
-      throw error;
-    }
+
+    this.watchlistsService.getWatchlists(page, this.watchlistPageSize, market).subscribe({
+      next: (response) => {
+        if (requestId !== this.watchlistRequestId) {
+          return;
+        }
+        this.applyWatchlistPage(response, market);
+      },
+      error: (error: unknown) => {
+        if (requestId !== this.watchlistRequestId) {
+          return;
+        }
+        this.watchlists = [];
+        this.selectedWatchlistId = '';
+        this.isLoadingWatchlists = false;
+        console.error('[Watchlists] Failed to load watchlists', error);
+        this.statusMessage = error instanceof HttpErrorResponse && error.status === 0
+          ? 'Unable to reach the watchlist service. Check that the backend is running.'
+          : error instanceof HttpErrorResponse
+            ? `Unable to load watchlists (HTTP ${error.status}).`
+            : 'Unable to load watchlists. Please try again.';
+      },
+    });
   }
 
-  private isWatchlistArray(value: unknown, market: WatchlistMarket): value is WatchlistGroup[] {
-    return Array.isArray(value) && value.every((watchlist) =>
-      typeof watchlist === 'object' && watchlist !== null
-      && 'id' in watchlist && typeof watchlist.id === 'string'
-      && 'name' in watchlist && typeof watchlist.name === 'string'
-      && 'market' in watchlist && watchlist.market === market
-      && 'currency' in watchlist && (watchlist.currency === 'USD' || watchlist.currency === 'INR')
-      && 'items' in watchlist && Array.isArray(watchlist.items)
-      && watchlist.items.every((item: unknown) =>
-        typeof item === 'object' && item !== null
-        && 'symbol' in item && typeof item.symbol === 'string'
-        && 'name' in item && typeof item.name === 'string'
-        && 'price' in item && typeof item.price === 'number'
-        && 'change' in item && typeof item.change === 'number'
-        && 'trend' in item && (item.trend === 'Bullish' || item.trend === 'Neutral' || item.trend === 'Bearish')),
-    );
+  private applyWatchlistPage(response: WatchlistPageResponse, market: WatchlistMarket): void {
+    const watchlists: WatchlistGroup[] = response.content.map((watchlist) => ({
+      id: String(watchlist.id),
+      name: watchlist.name,
+      market: watchlist.market,
+      currency: watchlist.currency,
+      items: watchlist.items.map((item) => ({
+        symbol: item.symbol,
+        name: item.name,
+      })),
+    }));
+    const apiFavoriteSymbols = response.content.flatMap((watchlist) =>
+      watchlist.items.filter((item) => item.isFavorite).map((item) => item.symbol));
+    this.favoriteSymbolsByMarket[market] = new Set([
+      ...this.favoriteSymbolsByMarket[market],
+      ...apiFavoriteSymbols,
+    ]);
+    this.watchlists = watchlists;
+    this.watchlistPage = response.page;
+    this.watchlistTotalPages = response.totalPages;
+    this.selectedWatchlistId = watchlists[0]?.id ?? '';
+    this.isLoadingWatchlists = false;
+    this.currentPage = 1;
   }
 
   private watchlistKey(watchlist: WatchlistGroup): string {
@@ -926,104 +1010,6 @@ export class WatchlistsComponent {
       US: [...this.favoriteSymbolsByMarket.US],
       India: [...this.favoriteSymbolsByMarket.India],
     }));
-  }
-
-  private parseCsv(csv: string): WatchlistItem[] {
-    const records = this.parseCsvRecords(csv);
-    if (records.length < 2) {
-      throw new Error('The CSV must include a header row and at least one asset.');
-    }
-    const headers = records[0].map((header) => header.trim().toLowerCase());
-    for (const requiredHeader of ['symbol', 'name', 'price', 'change']) {
-      if (!headers.includes(requiredHeader)) {
-        throw new Error(`CSV is missing the required "${requiredHeader}" column.`);
-      }
-    }
-    return records.slice(1).map((record, rowIndex) => {
-      const values = new Map(headers.map((header, index) => [header, record[index]?.trim() ?? '']));
-      const rowNumber = rowIndex + 2;
-      const symbol = values.get('symbol') ?? '';
-      const name = values.get('name') ?? '';
-      const priceValue = values.get('price') ?? '';
-      const changeValue = values.get('change') ?? '';
-      const price = Number(priceValue);
-      const change = Number(changeValue);
-      if (!symbol || !name || !priceValue || !changeValue || !Number.isFinite(price) || !Number.isFinite(change)) {
-        throw new Error(`CSV row ${rowNumber} needs a symbol, name, and valid price and change values.`);
-      }
-      const trendValue = values.get('trend');
-      const trend: WatchlistItem['trend'] = trendValue === 'Bullish' || trendValue === 'Bearish' || trendValue === 'Neutral'
-        ? trendValue
-        : change > 0 ? 'Bullish' : change < 0 ? 'Bearish' : 'Neutral';
-      const scoreValue = values.get('score');
-      const score = scoreValue ? Number(scoreValue) : undefined;
-      if (scoreValue && !Number.isFinite(score)) {
-        throw new Error(`CSV row ${rowNumber} has an invalid score.`);
-      }
-      const metricKeys: WatchlistMetricKey[] = this.availableColumns
-        .map((column) => column.key)
-        .filter((key): key is WatchlistMetricKey => !['symbol', 'name', 'assetType', 'price', 'change', 'trend', 'sector', 'score', 'volume'].includes(key));
-      const metrics: Partial<Record<WatchlistMetricKey, string | number>> = {};
-      for (const key of metricKeys) {
-        const value = values.get(key.toLowerCase());
-        if (value) {
-          metrics[key] = value;
-        }
-      }
-      return {
-        symbol,
-        name,
-        price,
-        change,
-        trend,
-        assetType: values.get('assettype') || undefined,
-        sector: values.get('sector') || undefined,
-        score,
-        volume: values.get('volume') || undefined,
-        metrics,
-      };
-    });
-  }
-
-  private parseCsvRecords(csv: string): string[][] {
-    const records: string[][] = [];
-    let record: string[] = [];
-    let value = '';
-    let quoted = false;
-    for (let index = 0; index < csv.length; index += 1) {
-      const character = csv[index];
-      if (character === '"') {
-        if (quoted && csv[index + 1] === '"') {
-          value += '"';
-          index += 1;
-        } else {
-          quoted = !quoted;
-        }
-      } else if (character === ',' && !quoted) {
-        record.push(value);
-        value = '';
-      } else if ((character === '\n' || character === '\r') && !quoted) {
-        if (character === '\r' && csv[index + 1] === '\n') {
-          index += 1;
-        }
-        record.push(value);
-        if (record.some((field) => field.trim())) {
-          records.push(record);
-        }
-        record = [];
-        value = '';
-      } else {
-        value += character;
-      }
-    }
-    if (quoted) {
-      throw new Error('CSV contains an unclosed quoted field.');
-    }
-    record.push(value);
-    if (record.some((field) => field.trim())) {
-      records.push(record);
-    }
-    return records;
   }
 
   private csvEscape(value: string): string {
